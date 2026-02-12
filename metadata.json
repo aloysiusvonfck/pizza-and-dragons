@@ -1,0 +1,7 @@
+{
+  "name": "Pizza And Dragons",
+  "description": "A multiplayer RPG where an AI Dungeon Master leads you on a quest to build the perfect pizza order, utilizing real-world maps for the final tavern location.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
