@@ -39,7 +39,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [state, setState] = useState<GameState>(defaultState);
   const [isLoading, setIsLoading] = useState(false);
   const [network, setNetwork] = useState<NetworkState>({
-    isHost: false,
+    isHost: false, // Kept for UI only, logic is now distributed
     roomId: null,
     peerId: null,
     connected: false
@@ -61,7 +61,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, [state, network.isHost, network.connected]);
 
   // --- Networking Helpers ---
-
+  // Now we broadcast to ALL peers, not just "clients"
   const broadcast = (msg: NetworkMessage) => {
     connectionsRef.current.forEach(conn => {
       if (conn.open) conn.send(msg);
@@ -211,21 +211,20 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  // --- Game Logic (Host Only Wrappers) ---
-
+  // --- Host Logic Removed: Now everyone can do this ---
   const generateCampaign = async (theme: string) => {
-    if (!network.isHost && network.connected) return; // Clients can't gen
     setIsLoading(true);
     const campaign = await geminiService.generateFullCampaign(theme);
     setState(prev => ({ ...prev, campaign }));
+    
+    // Broadcast the new campaign to the mesh
+    broadcast({ type: 'SYNC_STATE', payload: { ...state, campaign } });
     setIsLoading(false);
   };
 
   const startGame = async () => {
-    if (!network.isHost && network.connected) return;
     setIsLoading(true);
     
-    // Host logic
     const location = await getGeoLocation();
     const introText = await geminiService.startMovie(
       state.players,
@@ -236,33 +235,31 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       `**${state.campaign.title}**\n\n${state.campaign.intro}\n\n${introText}` : 
       introText;
 
-    setState(prev => ({
-      ...prev,
+    const newState = {
+      ...state,
       phase: GamePhase.PLAYING,
       mode: GameMode.CINEMATIC,
       sceneIndex: 1,
       currentSceneId: state.campaign?.startSceneId || '1',
       messages: [{ id: 'intro', sender: 'dm', text: initialText, timestamp: Date.now(), isCinematic: true }]
-    }));
+    };
+
+    setState(newState);
+    broadcast({ type: 'SYNC_STATE', payload: newState });
     setIsLoading(false);
   };
 
   const sendPlayerAction = async (text: string, playerId: string) => {
-    // If Client, send to Host
-    if (!network.isHost && network.connected) {
-      sendToHost({ type: 'PLAYER_ACTION', payload: { text, playerId } });
-      return;
-    }
-
-    // Host Processing
+    // EVERYONE processes actions locally first (optimistic UI)
     setIsLoading(true);
     const roll = Math.floor(Math.random() * 20) + 1;
     const player = state.players.find(p => p.id === playerId);
     const boostedRoll = roll + (player ? player.level - 1 : 0);
 
-    setState(prev => ({
-      ...prev,
-      messages: [...prev.messages, {
+    // Optimistic update
+    const optimisticState = {
+      ...state,
+      messages: [...state.messages, {
         id: Date.now().toString(),
         sender: 'player',
         playerName: player?.name || 'Actor',
@@ -270,9 +267,12 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         timestamp: Date.now(),
         diceRoll: boostedRoll
       }],
-      players: prev.players.map(p => p.id === playerId ? { ...p, contributions: p.contributions + 1 } : p)
-    }));
+      players: state.players.map(p => p.id === playerId ? { ...p, contributions: p.contributions + 1 } : p)
+    };
+    
+    setState(optimisticState);
 
+    // AI Resolution (Local)
     const location = await getGeoLocation();
     const response = await geminiService.resolveActionAndCut(
       `[Roll: ${boostedRoll}] ${text}`, 
@@ -282,9 +282,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     
     parseInventoryUpdate(response.text);
 
-    setState(prev => ({
-      ...prev,
-      messages: [...prev.messages, {
+    const finalState = {
+      ...optimisticState,
+      messages: [...optimisticState.messages, {
         id: (Date.now() + 1).toString(),
         sender: 'dm',
         text: response.text,
@@ -292,39 +292,41 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         timestamp: Date.now(),
         isCinematic: true
       }],
-      mode: prev.sceneIndex < 4 ? GameMode.MONTAGE : GameMode.CINEMATIC,
+      mode: optimisticState.sceneIndex < 4 ? GameMode.MONTAGE : GameMode.CINEMATIC,
       montage: {
-        ...prev.montage,
+        ...optimisticState.montage,
         step: 'MINIGAME' 
       }
-    }));
+    };
+
+    setState(finalState);
+    // Broadcast the result to the mesh
+    broadcast({ type: 'SYNC_STATE', payload: finalState });
     setIsLoading(false);
   };
 
   const completeMinigame = async (successCount: number) => {
-    if (!network.isHost && network.connected) {
-      sendToHost({ type: 'MINIGAME_COMPLETE', payload: { score: successCount } });
-      return;
-    }
-
+    // Mesh: Everyone processes locally and broadcasts
     const levelsGained = successCount > 0 ? 1 : 0;
-    setState(prev => ({
-      ...prev,
-      players: prev.players.map(p => ({ ...p, level: p.level + levelsGained })),
-      messages: [...prev.messages, {
+    const newState = {
+      ...state,
+      players: state.players.map(p => ({ ...p, level: p.level + levelsGained })),
+      messages: [...state.messages, {
         id: Date.now().toString(),
         sender: 'system',
         text: `MONTAGE TRAINING COMPLETE: Party gained ${levelsGained} Level(s). Now entering Story Mode...`,
         timestamp: Date.now()
       }],
       montage: {
-        ...prev.montage,
+        ...state.montage,
         step: 'STORY_DECISION',
-        queue: [...prev.players.map(p => p.id)], 
+        queue: [...state.players.map(p => p.id)], 
         activePlayerId: null
       }
-    }));
+    };
 
+    setState(newState);
+    broadcast({ type: 'SYNC_STATE', payload: newState });
     await startNextMontageTurn([...state.players.map(p => p.id)]);
   };
 
@@ -354,12 +356,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const makeMontageDecision = async (choice: string) => {
-    // If it's my turn but I am client, send choice
-    if (!network.isHost && network.connected) {
-      sendToHost({ type: 'MONTAGE_DECISION', payload: { choice, playerId: myPlayerId! } });
-      return;
-    }
-
+    // Mesh: Everyone processes locally and broadcasts
     const player = state.players.find(p => p.id === state.montage.activePlayerId);
     if (!player) return;
 
@@ -367,40 +364,47 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const resolution = await geminiService.resolveMontageChoice(player.name, choice);
     parseInventoryUpdate(resolution);
 
-    setState(prev => ({
-      ...prev,
-      messages: [...prev.messages, {
+    const newState = {
+      ...state,
+      messages: [...state.messages, {
         id: Date.now().toString(),
         sender: 'dm',
         text: `**${player.name}** chose: "${choice}"\nResult: ${resolution}`,
         timestamp: Date.now(),
         isCinematic: true
       }],
-      players: prev.players.map(p => p.id === player.id ? { ...p, contributions: p.contributions + 1 } : p)
-    }));
+      players: state.players.map(p => p.id === player.id ? { ...p, contributions: p.contributions + 1 } : p)
+    };
+
+    setState(newState);
+    broadcast({ type: 'SYNC_STATE', payload: newState });
 
     const remainingQueue = state.montage.queue.slice(1);
     await startNextMontageTurn(remainingQueue);
   };
 
   const finishMontage = async () => {
+    // Mesh: Everyone processes locally and broadcasts
     setIsLoading(true);
     const nextSceneIdx = state.sceneIndex + 1;
     const location = await getGeoLocation();
     const nextSceneText = await geminiService.generateNextScene(nextSceneIdx, location);
 
-    setState(prev => ({
-      ...prev,
+    const newState = {
+      ...state,
       sceneIndex: nextSceneIdx,
       mode: GameMode.CINEMATIC,
-      messages: [...prev.messages, {
+      messages: [...state.messages, {
         id: Date.now().toString(),
         sender: 'dm',
         text: nextSceneText,
         timestamp: Date.now(),
         isCinematic: true
       }]
-    }));
+    };
+
+    setState(newState);
+    broadcast({ type: 'SYNC_STATE', payload: newState });
     setIsLoading(false);
   };
 
@@ -441,10 +445,10 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const finishGame = () => {
-    setState(prev => ({ ...prev, phase: GamePhase.ORDER_SUMMARY }));
-    if (network.isHost && network.connected) {
-      broadcast({ type: 'SYNC_STATE', payload: { ...state, phase: GamePhase.ORDER_SUMMARY } });
-    }
+    // Mesh: Anyone can finish and broadcast
+    const newState = { ...state, phase: GamePhase.ORDER_SUMMARY };
+    setState(newState);
+    broadcast({ type: 'SYNC_STATE', payload: newState });
   };
 
   const value: GameContextType = {
