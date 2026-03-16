@@ -111,6 +111,10 @@ export interface GameState {
   montage: MontageState;
   campaign: Campaign | null; // The pre-generated story
   currentSceneId: string | null;
+  // NEW: Turn Management
+  currentTurnPlayerId: string | null; // Who can act right now?
+  turnCounter: number; // Global incrementing counter for sync
+  isProcessingTurn: boolean; // Lock for AI generation
 }
 
 // --- Networking Types ---

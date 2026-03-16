@@ -198,6 +198,10 @@ const GameSession: React.FC = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
+  const myPlayer = state.players.find(p => p.id === myPlayerId);
+  const isMyTurn = state.currentTurnPlayerId === myPlayerId;
+  const activePlayerName = state.players.find(p => p.id === state.currentTurnPlayerId)?.name;
+
   useEffect(() => {
     if (chatContainerRef.current) {
       chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
@@ -205,7 +209,7 @@ const GameSession: React.FC = () => {
   }, [state.messages]);
 
   const handleSend = () => {
-    if (inputText.trim() && !isLoading && myPlayerId) {
+    if (inputText.trim() && isMyTurn && myPlayerId && !isLoading) {
       sendPlayerAction(inputText, myPlayerId);
       setInputText('');
     }
@@ -245,8 +249,6 @@ const GameSession: React.FC = () => {
       </div>
     );
   };
-
-  const myPlayer = state.players.find(p => p.id === myPlayerId);
 
   return (
     <div className="flex flex-col h-screen max-w-7xl mx-auto md:flex-row overflow-hidden relative bg-black">
@@ -346,18 +348,27 @@ const GameSession: React.FC = () => {
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-              placeholder={myPlayer ? `What will ${myPlayer.name} do?` : 'Spectating...'}
-              disabled={isLoading || !myPlayer}
-              className="flex-1 bg-black text-[#cbb692] font-serif p-4 focus:outline-none placeholder-[#333] disabled:opacity-50"
+              placeholder={
+                !myPlayer ? 'Spectating...' :
+                !isMyTurn ? `Waiting for ${activePlayerName}...` :
+                `What will ${myPlayer.name} do?`
+              }
+              disabled={isLoading || !myPlayer || !isMyTurn}
+              className={`flex-1 bg-black text-[#cbb692] font-serif p-4 focus:outline-none placeholder-[#333] disabled:opacity-50 ${isMyTurn ? 'border-b-2 border-[#ffd700]' : ''}`}
             />
             <button 
               onClick={handleSend}
-              disabled={isLoading || !inputText.trim() || !myPlayer}
-              className="bg-[#1a0f0a] text-[#8a7042] px-6 border-l border-[#3d3226] hover:bg-[#2a1d15] hover:text-[#ffd700] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              disabled={isLoading || !inputText.trim() || !myPlayer || !isMyTurn}
+              className={`bg-[#1a0f0a] text-[#8a7042] px-6 border-l border-[#3d3226] hover:bg-[#2a1d15] hover:text-[#ffd700] disabled:opacity-50 disabled:cursor-not-allowed transition-colors ${isMyTurn ? 'text-[#ffd700] border-[#ffd700]' : ''}`}
             >
               <Send size={20} />
             </button>
           </div>
+          {!isMyTurn && myPlayer && (
+            <div className="text-center mt-2 text-xs text-[#8a7042] font-fantasy tracking-widest animate-pulse">
+              {activePlayerName}'s Turn
+            </div>
+          )}
         </div>
       </div>
     </div>

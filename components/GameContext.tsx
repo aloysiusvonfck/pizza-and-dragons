@@ -24,7 +24,10 @@ const defaultState: GameState = {
     options: []
   },
   campaign: null,
-  currentSceneId: null
+  currentSceneId: null,
+  currentTurnPlayerId: null,
+  turnCounter: 0,
+  isProcessingTurn: false
 };
 
 const GameContext = createContext<GameContextType | undefined>(undefined);
@@ -224,41 +227,54 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const startGame = async () => {
     setIsLoading(true);
-    
     const location = await getGeoLocation();
     const introText = await geminiService.startMovie(
       state.players,
       location
     );
-    
     const initialText = state.campaign ? 
       `**${state.campaign.title}**\n\n${state.campaign.intro}\n\n${introText}` : 
       introText;
 
-    const newState = {
-      ...state,
-      phase: GamePhase.PLAYING,
-      mode: GameMode.CINEMATIC,
-      sceneIndex: 1,
+    // Initialize turn: First player in the list starts
+    const firstPlayer = state.players[0];
+    const newState = { 
+      ...state, 
+      phase: GamePhase.PLAYING, 
+      mode: GameMode.CINEMATIC, 
+      sceneIndex: 1, 
       currentSceneId: state.campaign?.startSceneId || '1',
-      messages: [{ id: 'intro', sender: 'dm', text: initialText, timestamp: Date.now(), isCinematic: true }]
+      currentTurnPlayerId: firstPlayer?.id || null, // Start turn with first player
+      turnCounter: 1,
+      messages: [{ id: 'intro', sender: 'dm', text: initialText, timestamp: Date.now(), isCinematic: true }] 
     };
-
     setState(newState);
     broadcast({ type: 'SYNC_STATE', payload: newState });
     setIsLoading(false);
   };
 
   const sendPlayerAction = async (text: string, playerId: string) => {
-    // EVERYONE processes actions locally first (optimistic UI)
+    // TURN LOCK: Only the active player can act
+    if (playerId !== state.currentTurnPlayerId) {
+      console.warn("Not your turn!");
+      return; // Ignore action
+    }
+
+    // Lock the turn
+    if (state.isProcessingTurn) {
+      console.warn("Turn already processing!");
+      return;
+    }
+
     setIsLoading(true);
     const roll = Math.floor(Math.random() * 20) + 1;
     const player = state.players.find(p => p.id === playerId);
     const boostedRoll = roll + (player ? player.level - 1 : 0);
 
-    // Optimistic update
+    // Optimistic update with turn lock
     const optimisticState = {
       ...state,
+      isProcessingTurn: true, // Lock
       messages: [...state.messages, {
         id: Date.now().toString(),
         sender: 'player',
@@ -269,18 +285,21 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }],
       players: state.players.map(p => p.id === playerId ? { ...p, contributions: p.contributions + 1 } : p)
     };
-    
     setState(optimisticState);
 
     // AI Resolution (Local)
     const location = await getGeoLocation();
     const response = await geminiService.resolveActionAndCut(
-      `[Roll: ${boostedRoll}] ${text}`, 
+      `[Roll: ${boostedRoll}] ${text}`,
       Math.max(...state.players.map(p => p.level)),
       location
     );
-    
     parseInventoryUpdate(response.text);
+
+    // Determine next player (simple round-robin for now)
+    const currentPlayerIndex = state.players.findIndex(p => p.id === playerId);
+    const nextPlayerIndex = (currentPlayerIndex + 1) % state.players.length;
+    const nextPlayer = state.players[nextPlayerIndex];
 
     const finalState = {
       ...optimisticState,
@@ -295,8 +314,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       mode: optimisticState.sceneIndex < 4 ? GameMode.MONTAGE : GameMode.CINEMATIC,
       montage: {
         ...optimisticState.montage,
-        step: 'MINIGAME' 
-      }
+        step: 'MINIGAME'
+      },
+      currentTurnPlayerId: nextPlayer.id, // Pass the token
+      turnCounter: state.turnCounter + 1, // Increment turn counter
+      isProcessingTurn: false // Unlock
     };
 
     setState(finalState);
