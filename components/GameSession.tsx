@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useGame } from './GameContext';
-import { Send, MapPin, Pizza, User, Hexagon, LogOut, Clapperboard, Zap, Menu, X, Scroll as ScrollIcon, Sword, Shield, Crown } from 'lucide-react';
+import { Send, MapPin, Pizza, User, Hexagon, LogOut, Clapperboard, Zap, Menu, X, Scroll as ScrollIcon, Sword, Shield, Crown, RotateCcw, AlertTriangle, SkipForward, RefreshCcw } from 'lucide-react';
 import { GameMode } from '../types';
 import { ShadowPuppetStage } from './ShadowPuppetStage';
 
@@ -361,10 +361,12 @@ const VisualD20: React.FC<{
 };
 
 const GameSession: React.FC = () => {
-  const { state, sendPlayerAction, finishGame, completeMinigame, isLoading, myPlayerId } = useGame();
+  const { state, sendPlayerAction, finishGame, completeMinigame, isLoading, myPlayerId, resetGame } = useGame();
   const [inputText, setInputText] = useState('');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const chatContainerRef = useRef<HTMLDivElement>(null);
+  const [isMetaMode, setIsMetaMode] = useState(false); // NEW: Meta-chat toggle
+  const [showErrorMenu, setShowErrorMenu] = useState(false); // NEW: Error menu toggle
   
   // NEW: D20 Animation State
   const [d20Animation, setD20Animation] = useState<{
@@ -386,6 +388,41 @@ const GameSession: React.FC = () => {
   const suggestions = lastMessage?.sender === 'dm' 
     ? (lastMessage.text.match(/\*\[(.*?)\]\*/g)?.map(m => m.slice(2, -2)) || []) 
     : [];
+
+  const handleResetDM = async () => {
+    if (!confirm("Reset the Dungeon Master? This will restart the AI session but keep the story.")) return;
+    // Logic: Clear chat history, re-send intro, re-roll initiative
+    const location = await getGeoLocation();
+    const introText = await geminiService.startMovie(state.players, location);
+    const newState = {
+      ...state,
+      messages: [{ id: 'reset', sender: 'dm', text: `**DM RESTARTED**\n\n${introText}`, timestamp: Date.now(), isCinematic: true }],
+      isProcessingTurn: false,
+      currentTurnPlayerId: state.players[0]?.id || null
+    };
+    setState(newState);
+    broadcast({ type: 'SYNC_STATE', payload: newState });
+    setShowErrorMenu(false);
+  };
+
+  const handleForcePass = () => {
+    if (!confirm("Force pass the turn? Only use if the AI is stuck.")) return;
+    // Logic: Skip current turn, pass to next
+    const currentIndex = state.players.findIndex(p => p.id === state.currentTurnPlayerId);
+    const nextIndex = (currentIndex + 1) % state.players.length;
+    const nextPlayer = state.players[nextIndex];
+    
+    const newState = {
+      ...state,
+      currentTurnPlayerId: nextPlayer.id,
+      isProcessingTurn: false,
+      turnCounter: state.turnCounter + 1,
+      messages: [...state.messages, { id: Date.now().toString(), sender: 'system', text: `**SYSTEM**: Turn forced passed to ${nextPlayer.name}.`, timestamp: Date.now() }]
+    };
+    setState(newState);
+    broadcast({ type: 'SYNC_STATE', payload: newState });
+    setShowErrorMenu(false);
+  };
 
   useEffect(() => {
     if (chatContainerRef.current) {
@@ -537,12 +574,39 @@ const GameSession: React.FC = () => {
               </span>
             </div>
           </div>
-          {myPlayer?.isHost && (
-             <button onClick={finishGame} className="text-red-900 hover:text-red-600 font-fantasy text-xs border border-red-900 px-3 py-1 transition-colors uppercase tracking-widest">
-               End Session
-             </button>
-          )}
+          <div className="flex items-center gap-3">
+            <button 
+              onClick={() => setShowErrorMenu(!showErrorMenu)}
+              className="text-red-900 hover:text-red-500 transition-colors"
+              title="DM Emergency Controls"
+            >
+              <AlertTriangle size={20} />
+            </button>
+            {myPlayer?.isHost && (
+              <button onClick={finishGame} className="text-red-900 hover:text-red-600 font-fantasy text-xs border border-red-900 px-3 py-1 transition-colors uppercase tracking-widest">
+                End Session
+              </button>
+            )}
+          </div>
         </div>
+
+        {/* ERROR RECOVERY MENU */}
+        {showErrorMenu && (
+          <div className="absolute top-4 right-4 z-50 bg-[#1a0f0a] border-2 border-red-900 p-4 shadow-2xl animate-fade-in">
+            <h3 className="text-red-500 font-fantasy text-lg mb-3 flex items-center gap-2">
+              <AlertTriangle size={18} /> DM Emergency
+            </h3>
+            <button onClick={handleResetDM} className="w-full text-left p-2 text-sm text-[#cbb692] hover:bg-red-900/20 hover:text-white mb-2 flex items-center gap-2">
+              <RotateCcw size={14} /> Reset Dungeon Master
+            </button>
+            <button onClick={handleForcePass} className="w-full text-left p-2 text-sm text-[#cbb692] hover:bg-red-900/20 hover:text-white mb-2 flex items-center gap-2">
+              <SkipForward size={14} /> Force Pass Turn
+            </button>
+            <button onClick={() => setShowErrorMenu(false)} className="w-full text-left p-2 text-sm text-gray-500 hover:text-white">
+              Cancel
+            </button>
+          </div>
+        )}
 
         {/* Quest Log (Chat) */}
         <GothicLogContainer ref={chatContainerRef} className="flex-1 space-y-8">
