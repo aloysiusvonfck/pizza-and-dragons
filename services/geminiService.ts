@@ -30,43 +30,51 @@ export class GeminiService {
     if (!this.ai) throw new Error("AI not initialized");
 
     const prompt = `
-    Create a comprehensive D&D campaign outline about a quest for the "Ultimate Pizza Ingredient".
+    Create a **LAZY-LOADED** D&D campaign outline.
     
-    THEME: ${theme} (Strictly adhere to this genre/style).
+    THEME: ${theme}.
     
-    **STORY ARCHITECTURE**:
-    1. **Act I: The Call**: Introduce the conflict and the first major obstacle.
-    2. **Act II: The Journey**: 3 Major Scenes (Combat, Puzzle, Social) with branching paths.
-    3. **Act III: The Finale**: The real-world pizza tavern reveal.
+    **CRITICAL INSTRUCTION:**
+    Do NOT generate the entire story. We need to start IMMEDIATELY.
     
-    Structure the response as a valid JSON object with the following schema:
+    1. **Current Scene (Scene 1):**
+       - Full description, high stakes.
+       - 3 distinct choices (A, B, C).
+    
+    2. **Immediate Future (Scene 2 - The Next Step):**
+       - For **EACH** of the 3 choices above, generate the **immediate next scene** that would happen if that choice is taken.
+       - These are "Look-Ahead" scenes. Do NOT generate Scene 3 or beyond.
+    
+    3. **Output Format (Strict JSON):**
     {
-      "title": "Campaign Title",
-      "intro": "A cinematic movie-trailer style introduction text.",
+      "title": "...",
+      "intro": "...",
       "startSceneId": "scene_1",
-      "scenes": [
-        {
+      "scenes": {
+        "scene_1": {
           "id": "scene_1",
-          "title": "Scene Title",
-          "description": "Description of the conflict.",
-          "encounterType": "COMBAT" | "PUZZLE" | "SOCIAL" | "FINALE",
-          "reward": "Pepperoni",
+          "title": "...",
+          "description": "...",
+          "encounterType": "...",
           "options": [
-            { "text": "Choice A (Action)", "nextSceneId": "scene_2a" },
-            { "text": "Choice B (Action)", "nextSceneId": "scene_2b" },
-            { "text": "Choice C (Action)", "nextSceneId": "scene_2c" }
+            { "text": "Choice A", "nextSceneId": "scene_2_A" },
+            { "text": "Choice B", "nextSceneId": "scene_2_B" },
+            { "text": "Choice C", "nextSceneId": "scene_2_C" }
           ]
         },
-        ... (Create at least 4 scenes with branching paths. Scene 4 MUST be the FINALE)
-      ],
-      "majorPlotPoints": [
-        { "id": "point_1", "description": "The party discovers the missing ingredient is guarded by a Gnome Chef." },
-        { "id": "point_2", "description": "The party must solve the Riddle of the Yeast." }
-      ]
+        "scene_2_A": {
+          "id": "scene_2_A",
+          "title": "If they chose A...",
+          "description": "...",
+          "encounterType": "...",
+          "options": [ /* 3 new choices for this path */ ]
+        },
+        "scene_2_B": { ... },
+        "scene_2_C": { ... }
+      }
     }
     
-    Ensure the story has at least 2 branches that converge at the Finale.
-    The "options" array must contain 3 distinct, creative actions for the players to choose from.
+    **Only generate Scene 1 and the 3 immediate Scene 2s. Stop there.**
     `;
 
     try {

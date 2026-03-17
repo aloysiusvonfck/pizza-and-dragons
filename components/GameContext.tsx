@@ -430,6 +430,25 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const nextPlayerIndex = (currentPlayerIndex + 1) % state.players.length;
     const nextPlayer = state.players[nextPlayerIndex];
 
+    // Determine next scene (if applicable)
+    let nextSceneId = null;
+    if (state.campaign && state.currentSceneId) {
+      const currentScene = state.campaign.scenes[state.currentSceneId];
+      // If the action text matches one of the options, use that nextSceneId
+      // For now, we'll just use the first option as a placeholder (AI should resolve this)
+      // TODO: Parse AI response to find the actual next scene ID
+      if (currentScene.options && currentScene.options.length > 0) {
+        nextSceneId = currentScene.options[0].nextSceneId; // Placeholder
+      }
+    }
+
+    // Check if we need to expand the story (lazy loading)
+    if (nextSceneId && state.campaign && !state.campaign.scenes[nextSceneId]) {
+      // This scene doesn't exist yet! Trigger expansion.
+      // Note: We'll do this in the background, not blocking the turn.
+      setTimeout(() => expandStoryBranch(state.currentSceneId), 1000);
+    }
+
     const finalState = {
       ...optimisticState,
       messages: [...optimisticState.messages, {
@@ -449,6 +468,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       turnCounter: state.turnCounter + 1, // Increment turn counter
       isProcessingTurn: false // Unlock
     };
+
+    // Update state with new scene if it exists
+    if (nextSceneId && state.campaign?.scenes[nextSceneId]) {
+      finalState.currentSceneId = nextSceneId;
+    }
 
     setState(finalState);
     // Broadcast the result to the mesh
@@ -614,6 +638,63 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     broadcast({ type: 'SYNC_STATE', payload: newState });
   };
 
+  // Add a new function to expand the story dynamically
+  const expandStoryBranch = async (currentSceneId: string) => {
+    if (!network.isHost && network.connected) return; // Only host expands
+    setIsLoading(true);
+    
+    // 1. Get the current scene to know what choices led here
+    const currentScene = state.campaign?.scenes[currentSceneId];
+    if (!currentScene) { setIsLoading(false); return; }
+    
+    // 2. Generate the NEXT 3 branches for this specific path
+    // We ask the AI: "Given they chose [currentScene.title], what are the 3 next possible scenes?"
+    const prompt = `
+     The party has just arrived at: "${currentScene.title}".
+     They are now facing the next challenge.
+     Generate 3 distinct choices (A, B, C) and the immediate NEXT scene for EACH choice.
+     
+     Output JSON:
+     {
+       "newScenes": [
+         { "id": "scene_3_A", "title": "...", "description": "...", "encounterType": "...", "options": [...] },
+         { "id": "scene_3_B", "title": "...", "description": "...", "encounterType": "...", "options": [...] },
+         { "id": "scene_3_C", "title": "...", "description": "...", "encounterType": "...", "options": [...] }
+       ]
+     }
+     `;
+    
+    try {
+      const response = await geminiService.ai?.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: prompt,
+        config: { responseMimeType: 'application/json' }
+      });
+    
+      const data = JSON.parse(response?.text || "{}");
+      const newScenes = data.newScenes || [];
+    
+      // 3. Merge new scenes into the campaign
+      const updatedScenes = { ...state.campaign?.scenes };
+      newScenes.forEach((s: any) => {
+        updatedScenes[s.id] = s;
+      });
+    
+      // 4. Update state
+      setState(prev => ({
+        ...prev,
+        campaign: prev.campaign ? { ...prev.campaign, scenes: updatedScenes } : null
+      }));
+    
+      // Broadcast to all peers
+      broadcast({ type: 'SYNC_STATE', payload: state });
+    } catch (err) {
+      console.error("Failed to expand story branch", err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const value: GameContextType = {
     state,
     network,
@@ -627,7 +708,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     resetGame,
     finishGame,
     isLoading,
-    myPlayerId
+    myPlayerId,
+    expandStoryBranch
   };
 
   return (
