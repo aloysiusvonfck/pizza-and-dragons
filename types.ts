@@ -29,6 +29,7 @@ export interface Player {
   contributions: number;
   level: number;
   isHost?: boolean;
+  initiativeRoll?: number; // NEW: Initiative score for turn order
 }
 
 export interface PlayerProfile {

@@ -232,22 +232,34 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       state.players,
       location
     );
+    
+    // ROLL INITIATIVE FOR ALL PLAYERS
+    const playersWithInit = state.players.map(p => {
+      const d20 = Math.floor(Math.random() * 20) + 1;
+      const dexMod = Math.floor((p.stats.dex - 10) / 2);
+      const initiative = d20 + dexMod;
+      return { ...p, initiativeRoll: initiative };
+    });
+
+    // SORT BY INITIATIVE (DESCENDING)
+    const sortedPlayers = [...playersWithInit].sort((a, b) => b.initiativeRoll! - a.initiativeRoll!);
+
     const initialText = state.campaign ? 
       `**${state.campaign.title}**\n\n${state.campaign.intro}\n\n${introText}` : 
       introText;
 
-    // Initialize turn: First player in the list starts
-    const firstPlayer = state.players[0];
     const newState = { 
       ...state, 
       phase: GamePhase.PLAYING, 
       mode: GameMode.CINEMATIC, 
       sceneIndex: 1, 
       currentSceneId: state.campaign?.startSceneId || '1',
-      currentTurnPlayerId: firstPlayer?.id || null, // Start turn with first player
+      players: sortedPlayers, // Update state with sorted list
+      currentTurnPlayerId: sortedPlayers[0]?.id || null, // First player in sorted list
       turnCounter: 1,
       messages: [{ id: 'intro', sender: 'dm', text: initialText, timestamp: Date.now(), isCinematic: true }] 
     };
+    
     setState(newState);
     broadcast({ type: 'SYNC_STATE', payload: newState });
     setIsLoading(false);

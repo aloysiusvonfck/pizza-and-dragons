@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useGame } from './GameContext';
 import { Send, MapPin, Pizza, User, Hexagon, LogOut, Clapperboard, Zap, Menu, X, Scroll as ScrollIcon, Sword, Shield, Crown } from 'lucide-react';
 import { GameMode } from '../types';
+import { ShadowPuppetStage } from './ShadowPuppetStage';
 
 // --- Styled Components ---
 
@@ -192,15 +193,199 @@ const SidebarContent: React.FC = () => {
   );
 };
 
+// --- NEW: Action Widget Component ---
+const ActionWidget: React.FC<{ 
+  onAction: (text: string) => void; 
+  suggestions: string[]; 
+  isMyTurn: boolean;
+  isLoading: boolean;
+}> = ({ onAction, suggestions, isMyTurn, isLoading }) => {
+  const [customInput, setCustomInput] = useState('');
+
+  const handleSuggestionClick = (suggestion: string) => {
+    onAction(suggestion);
+  };
+
+  const handleCustomSubmit = () => {
+    if (customInput.trim()) {
+      onAction(customInput);
+      setCustomInput('');
+    }
+  };
+
+  if (!isMyTurn) return null;
+
+  return (
+    <div className="bg-[#1a0f0a] border-t-2 border-[#5c4d3c] p-4 animate-slide-up">
+      {/* Suggestion Pills */}
+      {suggestions.length > 0 && (
+        <div className="flex flex-wrap gap-2 mb-3">
+          {suggestions.map((s, i) => (
+            <button
+              key={i}
+              onClick={() => handleSuggestionClick(s)}
+              disabled={isLoading}
+              className="px-3 py-1.5 bg-[#2a1d15] border border-[#8a7042] text-[#cbb692] text-xs font-fantasy uppercase tracking-wider hover:bg-[#ffd700] hover:text-black hover:border-[#ffd700] transition-all disabled:opacity-50 disabled:cursor-not-allowed rounded-sm shadow-sm"
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Custom Input */}
+      <div className="relative">
+        <input
+          value={customInput}
+          onChange={(e) => setCustomInput(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleCustomSubmit()}
+          placeholder="What will you do? (Type or click above)"
+          disabled={isLoading}
+          className="w-full bg-black border border-[#5c4d3c] text-[#cbb692] font-serif p-3 pr-12 focus:outline-none focus:border-[#ffd700] placeholder-[#555] transition-colors"
+        />
+        <button
+          onClick={handleCustomSubmit}
+          disabled={isLoading || !customInput.trim()}
+          className="absolute right-2 top-1/2 -translate-y-1/2 text-[#8a7042] hover:text-[#ffd700] disabled:opacity-30 transition-colors"
+        >
+          <Send size={18} />
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// --- NEW: Visual D20 Component ---
+const VisualD20: React.FC<{ 
+  roll: number; 
+  modifier: number; 
+  total: number; 
+  onComplete: () => void;
+}> = ({ roll, modifier, total, onComplete }) => {
+  const [isRolling, setIsRolling] = useState(true);
+  const [displayRoll, setDisplayRoll] = useState(1);
+  const [phase, setPhase] = useState<'ROLLING' | 'RESULT'>('ROLLING');
+
+  useEffect(() => {
+    // Animate the roll
+    let count = 0;
+    const interval = setInterval(() => {
+      setDisplayRoll(Math.floor(Math.random() * 20) + 1);
+      count++;
+      if (count > 10) {
+        clearInterval(interval);
+        setDisplayRoll(roll);
+        setIsRolling(false);
+        setPhase('RESULT');
+        setTimeout(onComplete, 2000); // Show result for 2s then close
+      }
+    }, 100);
+
+    return () => clearInterval(interval);
+  }, [roll, onComplete]);
+
+  const isCrit = roll === 20;
+  const isFail = roll === 1;
+
+  return (
+    <div className="absolute inset-0 bg-black/80 z-[100] flex items-center justify-center backdrop-blur-sm animate-fade-in">
+      <div className="text-center">
+        {/* Rolling Animation */}
+        {isRolling && (
+          <div className="mb-8">
+            <div className="w-32 h-32 mx-auto border-4 border-[#ffd700] rounded-full flex items-center justify-center animate-spin shadow-[0_0_50px_rgba(255,215,0,0.5)]">
+              <span className="text-6xl font-fantasy text-[#ffd700]">{displayRoll}</span>
+            </div>
+            <p className="text-[#8a7042] mt-4 font-fantasy tracking-widest animate-pulse">ROLLING...</p>
+          </div>
+        )}
+
+        {/* Result Display */}
+        {!isRolling && phase === 'RESULT' && (
+          <div className={`mb-8 ${isCrit ? 'animate-bounce' : ''}`}>
+            <div className={`w-40 h-40 mx-auto border-4 rounded-full flex items-center justify-center shadow-[0_0_80px_rgba(255,215,0,0.8)] ${
+              isCrit ? 'border-[#ffd700] bg-[#ffd700]/20' : 
+              isFail ? 'border-red-600 bg-red-600/20' : 
+              'border-[#5c4d3c] bg-[#1a0f0a]'
+            }`}>
+              <span className={`text-7xl font-fantasy ${
+                isCrit ? 'text-[#ffd700]' : 
+                isFail ? 'text-red-600' : 
+                'text-[#cbb692]'
+              }`}>
+                {displayRoll}
+              </span>
+            </div>
+            
+            {/* Math Overlay */}
+            <div className="mt-6 flex items-center justify-center gap-3 text-2xl font-fantasy">
+              <span className={isCrit ? 'text-[#ffd700]' : isFail ? 'text-red-600' : 'text-[#cbb692]'}>
+                {displayRoll}
+              </span>
+              <span className="text-[#555]">+</span>
+              <span className="text-[#8a7042]">
+                {modifier >= 0 ? `+${modifier}` : modifier}
+              </span>
+              <span className="text-[#555]">=</span>
+              <span className={`text-3xl ${
+                total >= 15 ? 'text-green-500' : 
+                total < 10 ? 'text-red-500' : 
+                'text-[#cbb692]'
+              }`}>
+                {total}
+              </span>
+            </div>
+
+            {/* Success/Fail Message */}
+            <div className={`mt-4 text-lg font-serif italic ${
+              isCrit ? 'text-[#ffd700]' : 
+              isFail ? 'text-red-600' : 
+              'text-[#8a7042]'
+            }`}>
+              {isCrit ? 'CRITICAL SUCCESS!' : isFail ? 'CRITICAL FAILURE!' : 'Action Resolved'}
+            </div>
+          </div>
+        )}
+
+        {/* Border Flash Effect */}
+        {phase === 'RESULT' && (
+          <div className={`absolute inset-0 border-8 pointer-events-none ${
+            isCrit ? 'border-[#ffd700] animate-pulse' : 
+            isFail ? 'border-red-600 animate-pulse' : 
+            'border-transparent'
+          }`}></div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const GameSession: React.FC = () => {
   const { state, sendPlayerAction, finishGame, completeMinigame, isLoading, myPlayerId } = useGame();
   const [inputText, setInputText] = useState('');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const chatContainerRef = useRef<HTMLDivElement>(null);
+  
+  // NEW: D20 Animation State
+  const [d20Animation, setD20Animation] = useState<{
+    roll: number;
+    modifier: number;
+    total: number;
+  } | null>(null);
+
+  const [lastAction, setLastAction] = useState<string>('');
+  const [showD20, setShowD20] = useState(false);
+  const [currentRoll, setCurrentRoll] = useState<number>(0);
 
   const myPlayer = state.players.find(p => p.id === myPlayerId);
   const isMyTurn = state.currentTurnPlayerId === myPlayerId;
   const activePlayerName = state.players.find(p => p.id === state.currentTurnPlayerId)?.name;
+
+  // NEW: Parse suggestions from the last AI message (if any)
+  const lastMessage = state.messages[state.messages.length - 1];
+  const suggestions = lastMessage?.sender === 'dm' 
+    ? (lastMessage.text.match(/\*\[(.*?)\]\*/g)?.map(m => m.slice(2, -2)) || []) 
+    : [];
 
   useEffect(() => {
     if (chatContainerRef.current) {
@@ -208,10 +393,13 @@ const GameSession: React.FC = () => {
     }
   }, [state.messages]);
 
-  const handleSend = () => {
-    if (inputText.trim() && isMyTurn && myPlayerId && !isLoading) {
-      sendPlayerAction(inputText, myPlayerId);
-      setInputText('');
+  const handleSend = (text: string) => {
+    if (text.trim() && !isLoading && myPlayerId && isMyTurn) {
+      setLastAction(text);
+      setCurrentRoll(Math.floor(Math.random() * 20) + 1);
+      setShowD20(true);
+      sendPlayerAction(text, myPlayerId);
+      setTimeout(() => setShowD20(false), 2000);
     }
   };
 
@@ -252,7 +440,26 @@ const GameSession: React.FC = () => {
 
   return (
     <div className="flex flex-col h-screen max-w-7xl mx-auto md:flex-row overflow-hidden relative bg-black">
-      
+      {/* D20 Overlay */}
+      {showD20 && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="text-8xl font-fantasy text-amber-400 animate-bounce drop-shadow-[0_0_30px_rgba(255,165,0,0.8)]">
+            {currentRoll}
+          </div>
+        </div>
+      )}
+
+      {/* Shadow Puppet Stage */}
+      <div className="w-full p-4 bg-stone-900">
+        <ShadowPuppetStage 
+          players={state.players}
+          currentPlayerId={state.currentTurnPlayerId}
+          lastAction={lastAction}
+          isRolling={showD20}
+          rollResult={currentRoll}
+        />
+      </div>
+
       {/* OVERLAYS */}
       {state.mode === GameMode.MONTAGE && state.montage.step === 'MINIGAME' && (
         <MontageMinigame onComplete={completeMinigame} />
@@ -341,35 +548,13 @@ const GameSession: React.FC = () => {
           )}
         </GothicLogContainer>
 
-        {/* Input Area */}
-        <div className="p-4 bg-[#0c0c0c] border-t border-[#3d3226]">
-          <div className="max-w-4xl mx-auto relative flex gap-0 shadow-[0_0_20px_rgba(0,0,0,1)] border border-[#3d3226]">
-            <input
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-              placeholder={
-                !myPlayer ? 'Spectating...' :
-                !isMyTurn ? `Waiting for ${activePlayerName}...` :
-                `What will ${myPlayer.name} do?`
-              }
-              disabled={isLoading || !myPlayer || !isMyTurn}
-              className={`flex-1 bg-black text-[#cbb692] font-serif p-4 focus:outline-none placeholder-[#333] disabled:opacity-50 ${isMyTurn ? 'border-b-2 border-[#ffd700]' : ''}`}
-            />
-            <button 
-              onClick={handleSend}
-              disabled={isLoading || !inputText.trim() || !myPlayer || !isMyTurn}
-              className={`bg-[#1a0f0a] text-[#8a7042] px-6 border-l border-[#3d3226] hover:bg-[#2a1d15] hover:text-[#ffd700] disabled:opacity-50 disabled:cursor-not-allowed transition-colors ${isMyTurn ? 'text-[#ffd700] border-[#ffd700]' : ''}`}
-            >
-              <Send size={20} />
-            </button>
-          </div>
-          {!isMyTurn && myPlayer && (
-            <div className="text-center mt-2 text-xs text-[#8a7042] font-fantasy tracking-widest animate-pulse">
-              {activePlayerName}'s Turn
-            </div>
-          )}
-        </div>
+        {/* NEW: Action Widget at the bottom */}
+        <ActionWidget 
+          onAction={(text) => sendPlayerAction(text, myPlayerId!)}
+          suggestions={suggestions}
+          isMyTurn={isMyTurn}
+          isLoading={isLoading}
+        />
       </div>
     </div>
   );
