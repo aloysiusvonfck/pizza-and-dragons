@@ -438,6 +438,41 @@ const GameSession: React.FC = () => {
     );
   };
 
+  const renderMessage = (msg: ChatMessage) => {
+    const isMeta = msg.channel === 'meta' || msg.sender === 'meta';
+    
+    return (
+     <div key={msg.id} className={`group ${isMeta ? 'opacity-90' : ''}`}>
+      {/* Header */}
+      <div className="flex items-center gap-3 mb-2 opacity-80">
+       <span className={`text-xs font-bold uppercase tracking-widest ${
+        isMeta ? 'text-gray-500' : msg.sender === 'dm' ? 'text-[#ffd700]' : 'text-[#8a7042]'
+       }`}>
+        {isMeta ? 'Party Chat' : msg.sender === 'dm' ? 'Dungeon Master' : msg.playerName}
+       </span>
+       <span className="text-[10px] text-[#333] font-mono">{new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+      </div>
+
+      {/* Body */}
+      <div className={`relative pl-4 border-l-2 leading-relaxed ${
+        isMeta 
+         ? 'border-gray-600 text-gray-400 italic' 
+         : msg.sender === 'dm' ? 'border-[#ffd700] text-[#e0e0e0]' : 
+           msg.sender === 'system' ? 'border-green-800 text-green-800 italic' :
+           'border-[#555] text-gray-400'
+      }`}>
+       {msg.diceRoll !== undefined && (
+        <span className={`float-right ml-4 font-fantasy text-lg ${getRollColor(msg.diceRoll)}`}>
+         [Roll: {msg.diceRoll}]
+        </span>
+       )}
+       {msg.text}
+       {renderGroundingData(msg.groundingMetadata)}
+      </div>
+     </div>
+    );
+   };
+
   return (
     <div className="flex flex-col h-screen max-w-7xl mx-auto md:flex-row overflow-hidden relative bg-black">
       {/* D20 Overlay */}
@@ -511,34 +546,7 @@ const GameSession: React.FC = () => {
 
         {/* Quest Log (Chat) */}
         <GothicLogContainer ref={chatContainerRef} className="flex-1 space-y-8">
-          {state.messages.map((msg) => (
-            <div key={msg.id} className={`group ${msg.sender === 'player' ? '' : ''}`}>
-              
-              {/* Header for message */}
-              <div className="flex items-center gap-3 mb-2 opacity-80">
-                <span className={`text-xs font-bold uppercase tracking-widest
-                  ${msg.sender === 'dm' ? 'text-[#ffd700]' : msg.sender === 'system' ? 'text-green-700' : 'text-[#8a7042]'}`}>
-                  {msg.sender === 'dm' ? 'Dungeon Master' : msg.sender === 'system' ? 'Game System' : msg.playerName}
-                </span>
-                <span className="text-[10px] text-[#333] font-mono">{new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-              </div>
-
-              {/* Message Body */}
-              <div className={`relative pl-4 border-l-2 leading-relaxed ${
-                 msg.sender === 'dm' ? 'border-[#ffd700] text-[#e0e0e0]' : 
-                 msg.sender === 'system' ? 'border-green-800 text-green-800 italic' :
-                 'border-[#555] text-gray-400'
-              }`}>
-                {msg.diceRoll !== undefined && (
-                   <span className={`float-right ml-4 font-fantasy text-lg ${getRollColor(msg.diceRoll)}`}>
-                     [Roll: {msg.diceRoll}]
-                   </span>
-                )}
-                {msg.text}
-                {renderGroundingData(msg.groundingMetadata)}
-              </div>
-            </div>
-          ))}
+          {state.messages.map((msg) => renderMessage(msg))}
           
           {isLoading && (
             <div className="text-center py-4">

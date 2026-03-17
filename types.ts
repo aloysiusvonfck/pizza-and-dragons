@@ -43,13 +43,14 @@ export interface PlayerProfile {
 
 export interface ChatMessage {
   id: string;
-  sender: 'dm' | 'player' | 'system';
+  sender: 'dm' | 'player' | 'system' | 'meta';
   playerName?: string;
   text: string;
   timestamp: number;
   groundingMetadata?: GroundingMetadata;
   diceRoll?: number;
   isCinematic?: boolean;
+  channel?: 'narrative' | 'meta';
 }
 
 export interface GroundingMetadata {

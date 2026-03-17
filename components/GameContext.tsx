@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useRef, ReactNod
 import { GameState, GamePhase, GameMode, GameContextType, Player, ChatMessage, NetworkState, NetworkMessage, PlayerProfile } from '../types';
 import { geminiService } from '../services/geminiService';
 import Peer, { DataConnection } from 'peerjs';
+import { agentService } from '../services/AgentService';
 
 const defaultState: GameState = {
   phase: GamePhase.LOBBY,
@@ -38,6 +39,40 @@ export const useGame = () => {
   return context;
 };
 
+// --- NEW: Persistence Hooks ---
+const usePersistence = () => {
+ const SAVE_KEY = 'pizza_dragons_state';
+
+ // Load state on mount
+ useEffect(() => {
+  const saved = localStorage.getItem(SAVE_KEY);
+  if (saved) {
+   try {
+    const parsed = JSON.parse(saved);
+    // Merge with default state to ensure new fields exist
+    setState(prev => ({ ...prev, ...parsed }));
+   } catch (e) {
+    console.error("Failed to load saved state", e);
+   }
+  }
+ }, []);
+
+ // Save state on change (debounced)
+ useEffect(() => {
+  const timeout = setTimeout(() => {
+   localStorage.setItem(SAVE_KEY, JSON.stringify(state));
+  }, 30000); // Save every 30s
+
+  return () => clearTimeout(timeout);
+ }, [state]);
+
+ const clearSave = () => {
+  localStorage.removeItem(SAVE_KEY);
+ };
+
+ return { clearSave };
+};
+
 export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [state, setState] = useState<GameState>(defaultState);
   const [isLoading, setIsLoading] = useState(false);
@@ -48,11 +83,40 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     connected: false
   });
   const [myPlayerId, setMyPlayerId] = useState<string | null>(null);
+  const { clearSave } = usePersistence();
 
   // Refs for networking to avoid stale closures in callbacks
   const peerRef = useRef<Peer | null>(null);
   const connectionsRef = useRef<DataConnection[]>([]);
   const stateRef = useRef<GameState>(state);
+
+  // Track connected peers (simple version: assume all peers in connectionsRef are connected)
+  const [connectedPeers, setConnectedPeers] = useState<string[]>([]);
+
+  // Update connected peers when connections change
+  useEffect(() => {
+    const peers = connectionsRef.current
+      .filter(c => c.open)
+      .map(c => c.peerId);
+    setConnectedPeers(peers);
+  }, [state]); // Re-run when state changes (could be optimized with a ref)
+
+  // Check for disconnected players and trigger agent
+  useEffect(() => {
+    if (state.phase !== GamePhase.PLAYING) return;
+    if (state.isProcessingTurn) return;
+
+    const currentPlayer = state.players.find(p => p.id === state.currentTurnPlayerId);
+    if (!currentPlayer) return;
+
+    // If the current player is NOT in the connected peers list, trigger agent
+    const isPlayerConnected = connectedPeers.includes(currentPlayer.id) || currentPlayer.id === myPlayerId;
+    
+    if (!isPlayerConnected) {
+      console.log(`Player ${currentPlayer.name} is offline. Triggering AI Agent.`);
+      handleAgentTurn(currentPlayer);
+    }
+  }, [state.currentTurnPlayerId, connectedPeers, state.phase]);
 
   // Keep state ref in sync
   useEffect(() => {
@@ -265,7 +329,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setIsLoading(false);
   };
 
-  const sendPlayerAction = async (text: string, playerId: string) => {
+  const sendPlayerAction = async (text: string, playerId: string, channel: 'narrative' | 'meta' = 'narrative') => {
     // TURN LOCK: Only the active player can act
     if (playerId !== state.currentTurnPlayerId) {
       console.warn("Not your turn!");
@@ -279,8 +343,27 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     setIsLoading(true);
-    const roll = Math.floor(Math.random() * 20) + 1;
     const player = state.players.find(p => p.id === playerId);
+
+    // If meta, just broadcast the message without AI processing
+    if (channel === 'meta') {
+      const newState = {
+        ...state,
+        messages: [...state.messages, {
+          id: Date.now().toString(),
+          sender: 'meta',
+          playerName: player?.name,
+          text,
+          timestamp: Date.now(),
+          channel: 'meta'
+        }]
+      };
+      setState(newState);
+      broadcast({ type: 'SYNC_STATE', payload: newState });
+      return;
+    }
+
+    const roll = Math.floor(Math.random() * 20) + 1;
     const boostedRoll = roll + (player ? player.level - 1 : 0);
 
     // Optimistic update with turn lock
@@ -442,6 +525,17 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setIsLoading(false);
   };
 
+  const handleAgentTurn = async (player: Player) => {
+    setIsLoading(true);
+    
+    // Generate action
+    const action = await agentService.generateAction(player, state.messages, `Scene ${state.sceneIndex}`);
+    
+    // Process as if the player sent it
+    await sendPlayerAction(action, player.id);
+    setIsLoading(false);
+  };
+
   // --- Helpers ---
 
   const getGeoLocation = async () => {
@@ -475,6 +569,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const resetGame = () => {
+     clearSave();
      window.location.reload();
   };
 
