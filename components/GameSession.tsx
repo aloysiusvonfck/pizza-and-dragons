@@ -3,6 +3,7 @@ import { useGame } from './GameContext';
 import { Send, MapPin, Pizza, User, Hexagon, LogOut, Clapperboard, Zap, Menu, X, Scroll as ScrollIcon, Sword, Shield, Crown, RotateCcw, AlertTriangle, SkipForward, RefreshCcw } from 'lucide-react';
 import { GameMode } from '../types';
 import { ShadowPuppetStage } from './ShadowPuppetStage';
+import { audioService } from '../services/AudioService';
 
 // --- Styled Components ---
 
@@ -361,7 +362,7 @@ const VisualD20: React.FC<{
 };
 
 const GameSession: React.FC = () => {
-  const { state, sendPlayerAction, finishGame, completeMinigame, isLoading, myPlayerId, resetGame } = useGame();
+  const { state, sendPlayerAction, finishGame, completeMinigame, isLoading, myPlayerId } = useGame();
   const [inputText, setInputText] = useState('');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -512,6 +513,33 @@ const GameSession: React.FC = () => {
 
   // NEW: Mobile state
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+
+  // --- Sound Effects Triggers ---
+
+  // Fire crackle on mount/unmount
+  useEffect(() => {
+    audioService.playFireCrackle();
+    return () => audioService.stopFireCrackle();
+  }, []);
+
+  // D20 roll when rolling starts
+  useEffect(() => {
+    if (isRolling) {
+     audioService.playD20Roll();
+    }
+  }, [isRolling]);
+
+  // FX sounds
+  useEffect(() => {
+    if (fx.type === 'sword') audioService.playSwordClash();
+    if (fx.type === 'fireball') audioService.playFireball();
+  }, [fx]);
+
+  // Success/Fail chimes
+  useEffect(() => {
+    if (rollResult === 20) audioService.playSuccess();
+    if (rollResult === 1) audioService.playFail();
+  }, [rollResult]);
 
   return (
     <div className="flex flex-col h-screen max-w-7xl mx-auto md:flex-row overflow-hidden relative bg-black">
