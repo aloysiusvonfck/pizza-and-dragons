@@ -510,85 +510,85 @@ const GameSession: React.FC = () => {
     );
    };
 
+  // NEW: Mobile state
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+
   return (
     <div className="flex flex-col h-screen max-w-7xl mx-auto md:flex-row overflow-hidden relative bg-black">
-      {/* D20 Overlay */}
-      {showD20 && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="text-8xl font-fantasy text-amber-400 animate-bounce drop-shadow-[0_0_30px_rgba(255,165,0,0.8)]">
-            {currentRoll}
+      {/* MOBILE DRAWER OVERLAY */}
+      {isDrawerOpen && (
+        <div 
+          className="fixed inset-0 bg-black/80 z-40 md:hidden backdrop-blur-sm" 
+          onClick={() => setIsDrawerOpen(false)}
+        >
+          <div 
+            className="absolute left-0 top-0 bottom-0 w-4/5 max-w-xs bg-[#0c0c0c] border-r-2 border-[#3d3226] shadow-2xl flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Drawer Header */}
+            <div className="p-4 border-b border-[#3d3226] flex justify-between items-center bg-[#1a0f0a]">
+              <h2 className="text-xl font-fantasy text-[#ffd700]">Party & Loot</h2>
+              <button onClick={() => setIsDrawerOpen(false)} className="text-gray-400 hover:text-white">
+                <X size={24} />
+              </button>
+            </div>
+            {/* Drawer Content (reuse SidebarContent) */}
+            <div className="flex-1 overflow-y-auto p-4">
+              <SidebarContent />
+            </div>
           </div>
         </div>
       )}
 
-      {/* Shadow Puppet Stage */}
-      <div className="w-full p-4 bg-stone-900">
-        <ShadowPuppetStage 
-          players={state.players}
-          currentPlayerId={state.currentTurnPlayerId}
-          lastAction={lastAction}
-          isRolling={showD20}
-          rollResult={currentRoll}
-        />
+      {/* MOBILE HEADER (Visible only on small screens) */}
+      <div className="md:hidden h-14 bg-[#0c0c0c] border-b border-[#3d3226] flex items-center justify-between px-4 shrink-0 z-30">
+        <button onClick={() => setIsDrawerOpen(true)} className="text-[#8a7042] hover:text-[#ffd700]">
+          <Menu size={24} />
+        </button>
+        <span className="font-fantasy text-[#cbb692] text-lg tracking-widest">
+          Act {state.sceneIndex}
+        </span>
+        {myPlayer?.isHost && (
+          <button onClick={finishGame} className="text-red-900 hover:text-red-600 text-xs border border-red-900 px-2 py-1 uppercase tracking-widest">
+            End
+          </button>
+        )}
       </div>
 
-      {/* OVERLAYS */}
-      {state.mode === GameMode.MONTAGE && state.montage.step === 'MINIGAME' && (
-        <MontageMinigame onComplete={completeMinigame} />
-      )}
-      {state.mode === GameMode.MONTAGE && state.montage.step === 'STORY_DECISION' && (
-        <MontageDecision />
-      )}
-
-      {/* MOBILE MENU DRAWER */}
-      {isMobileMenuOpen && (
-        <div className="fixed inset-0 z-40 bg-black/90 md:hidden backdrop-blur-sm" onClick={() => setIsMobileMenuOpen(false)}>
-          <div className="absolute left-0 top-0 bottom-0 w-3/4 max-w-xs bg-[#0c0c0c] border-r border-[#3d3226] shadow-2xl" onClick={e => e.stopPropagation()}>
-            <SidebarContent />
-          </div>
-        </div>
-      )}
-
-      {/* DESKTOP SIDEBAR */}
+      {/* DESKTOP SIDEBAR (Hidden on mobile) */}
       <GothicPanel className="hidden md:flex w-80 flex-col gap-6 overflow-y-auto shrink-0 z-10">
         <SidebarContent />
       </GothicPanel>
 
-      {/* MAIN LOG AREA */}
+      {/* MAIN CONTENT AREA */}
       <div className="flex-1 flex flex-col relative min-w-0">
-        {/* Header */}
-        <div className="h-16 border-b border-[#3d3226] bg-[#0c0c0c] flex items-center justify-between px-4 shrink-0 z-10 shadow-lg">
-          <div className="flex items-center gap-4">
-            <button 
-              className="md:hidden text-[#8a7042] hover:text-[#ffd700]"
-              onClick={() => setIsMobileMenuOpen(true)}
-            >
-              <Menu size={24} />
-            </button>
-            <div className="flex flex-col">
-              <span className="font-fantasy text-[#cbb692] text-lg tracking-widest">
-                Act {state.sceneIndex}
-              </span>
-              <span className="text-[10px] text-[#555] uppercase tracking-[0.2em]">
-                {state.sceneIndex === 4 ? 'The Final Confrontation' : 'The Journey Continues'}
-              </span>
+        {/* D20 Overlay */}
+        {showD20 && (
+          <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+            <div className="text-8xl font-fantasy text-amber-400 animate-bounce drop-shadow-[0_0_30px_rgba(255,165,0,0.8)]">
+              {currentRoll}
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <button 
-              onClick={() => setShowErrorMenu(!showErrorMenu)}
-              className="text-red-900 hover:text-red-500 transition-colors"
-              title="DM Emergency Controls"
-            >
-              <AlertTriangle size={20} />
-            </button>
-            {myPlayer?.isHost && (
-              <button onClick={finishGame} className="text-red-900 hover:text-red-600 font-fantasy text-xs border border-red-900 px-3 py-1 transition-colors uppercase tracking-widest">
-                End Session
-              </button>
-            )}
-          </div>
+        )}
+
+        {/* Shadow Puppet Stage */}
+        <div className="w-full p-4 bg-stone-900">
+          <ShadowPuppetStage 
+            players={state.players}
+            currentPlayerId={state.currentTurnPlayerId}
+            lastAction={lastAction}
+            isRolling={showD20}
+            rollResult={currentRoll}
+          />
         </div>
+
+        {/* OVERLAYS */}
+        {state.mode === GameMode.MONTAGE && state.montage.step === 'MINIGAME' && (
+          <MontageMinigame onComplete={completeMinigame} />
+        )}
+        {state.mode === GameMode.MONTAGE && state.montage.step === 'STORY_DECISION' && (
+          <MontageDecision />
+        )}
 
         {/* ERROR RECOVERY MENU */}
         {showErrorMenu && (
@@ -609,7 +609,7 @@ const GameSession: React.FC = () => {
         )}
 
         {/* Quest Log (Chat) */}
-        <GothicLogContainer ref={chatContainerRef} className="flex-1 space-y-8">
+        <GothicLogContainer ref={chatContainerRef} className="flex-1 space-y-8 overflow-y-auto">
           {state.messages.map((msg) => renderMessage(msg))}
           
           {isLoading && (
@@ -621,12 +621,14 @@ const GameSession: React.FC = () => {
         </GothicLogContainer>
 
         {/* NEW: Action Widget at the bottom */}
-        <ActionWidget 
-          onAction={(text) => sendPlayerAction(text, myPlayerId!)}
-          suggestions={suggestions}
-          isMyTurn={isMyTurn}
-          isLoading={isLoading}
-        />
+        <div className="p-3 md:p-4 bg-[#0c0c0c] border-t border-[#3d3226]">
+          <ActionWidget 
+            onAction={(text) => sendPlayerAction(text, myPlayerId!)}
+            suggestions={suggestions}
+            isMyTurn={isMyTurn}
+            isLoading={isLoading}
+          />
+        </div>
       </div>
     </div>
   );
