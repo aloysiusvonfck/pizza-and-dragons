@@ -300,7 +300,19 @@ export default function Lobby() {
 
   const handleFinalizeHero = () => {
     if (name && age) {
-      setStep('CONNECTION');
+      // NEW: If this is the first player (host), start story generation IMMEDIATELY
+      if (step === 'CREATION' && !state.campaign) {
+        // We are about to become host, trigger story gen now
+        // This will happen in the background
+        const theme = THEMES[0]; 
+        // We can't call generateCampaign here directly because hostGame isn't called yet
+        // Instead, we'll trigger it in the effect when hostGame is called, 
+        // but we can also trigger it here if we are already connected?
+        // Better: Trigger it in the 'CONNECTION' step when we are ready to host.
+        setStep('CONNECTION');
+      } else {
+        setStep('CONNECTION');
+      }
     }
   };
 

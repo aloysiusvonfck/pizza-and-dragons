@@ -30,9 +30,14 @@ export class GeminiService {
     if (!this.ai) throw new Error("AI not initialized");
 
     const prompt = `
-    Create a funny, high-stakes D&D campaign outline about a quest for the "Ultimate Pizza Ingredient".
+    Create a comprehensive D&D campaign outline about a quest for the "Ultimate Pizza Ingredient".
     
     THEME: ${theme} (Strictly adhere to this genre/style).
+    
+    **STORY ARCHITECTURE**:
+    1. **Act I: The Call**: Introduce the conflict and the first major obstacle.
+    2. **Act II: The Journey**: 3 Major Scenes (Combat, Puzzle, Social) with branching paths.
+    3. **Act III: The Finale**: The real-world pizza tavern reveal.
     
     Structure the response as a valid JSON object with the following schema:
     {
@@ -45,17 +50,23 @@ export class GeminiService {
           "title": "Scene Title",
           "description": "Description of the conflict.",
           "encounterType": "COMBAT" | "PUZZLE" | "SOCIAL" | "FINALE",
-          "reward": "Pepperoni" (Optional loot),
+          "reward": "Pepperoni",
           "options": [
-             { "text": "Choice A", "nextSceneId": "scene_2a" },
-             { "text": "Choice B", "nextSceneId": "scene_2b" }
+            { "text": "Choice A (Action)", "nextSceneId": "scene_2a" },
+            { "text": "Choice B (Action)", "nextSceneId": "scene_2b" },
+            { "text": "Choice C (Action)", "nextSceneId": "scene_2c" }
           ]
         },
         ... (Create at least 4 scenes with branching paths. Scene 4 MUST be the FINALE)
+      ],
+      "majorPlotPoints": [
+        { "id": "point_1", "description": "The party discovers the missing ingredient is guarded by a Gnome Chef." },
+        { "id": "point_2", "description": "The party must solve the Riddle of the Yeast." }
       ]
     }
     
     Ensure the story has at least 2 branches that converge at the Finale.
+    The "options" array must contain 3 distinct, creative actions for the players to choose from.
     `;
 
     try {

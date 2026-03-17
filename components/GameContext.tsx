@@ -202,9 +202,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
     });
 
-    // NEW: Auto-generate campaign immediately after host joins
-    // This happens in the background, doesn't block the UI
-    const theme = THEMES[0]; // Default theme, or pass from lobby
+    // NEW: Start Story Generation IMMEDIATELY upon hosting
+    // This is the "Dungeon Architect" phase - building the full story bible
+    setIsLoading(true);
+    const theme = THEMES[0]; // Or pass from lobby state
+    
+    // We call generateCampaign which now builds the FULL story in background
+    // The game can still be started before it finishes (prologue mode)
     generateCampaign(theme);
 
     return peer.id;
