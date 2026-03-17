@@ -238,6 +238,8 @@ export const ShadowPuppetStage: React.FC<ShadowPuppetStageProps> = ({
   rollResult 
 }) => {
   const [showDragon, setShowDragon] = useState(false);
+  const [fx, setFx] = useState<{ type: 'sword' | 'fireball' | 'none'; active: boolean }>({ type: 'none', active: false });
+  const [flash, setFlash] = useState<'none' | 'gold' | 'red'>('none');
   const positions: PuppetProps['position'][] = ['left', 'center-left', 'center', 'center-right', 'right'];
   
   useEffect(() => {
@@ -249,9 +251,34 @@ export const ShadowPuppetStage: React.FC<ShadowPuppetStageProps> = ({
     }
   }, [rollResult]);
 
+  // Detect action type from lastAction text
+  useEffect(() => {
+    if (lastAction) {
+      const lower = lastAction.toLowerCase();
+      if (lower.includes('swing') || lower.includes('stab') || lower.includes('attack') || lower.includes('slash')) {
+        setFx({ type: 'sword', active: true });
+        setTimeout(() => setFx({ type: 'none', active: false }), 800);
+      } else if (lower.includes('fire') || lower.includes('spell') || lower.includes('blast') || lower.includes('magic')) {
+        setFx({ type: 'fireball', active: true });
+        setTimeout(() => setFx({ type: 'none', active: false }), 1000);
+      }
+    }
+  }, [lastAction]);
+
+  // Detect roll result for flash
+  useEffect(() => {
+    if (rollResult === 20) {
+      setFlash('gold');
+      setTimeout(() => setFlash('none'), 500);
+    } else if (rollResult === 1) {
+      setFlash('red');
+      setTimeout(() => setFlash('none'), 500);
+    }
+  }, [rollResult]);
+
   return (
     <div 
-      className="relative w-full h-96 overflow-hidden rounded-lg border-4 border-stone-800"
+      className={`relative w-full max-w-4xl mx-auto aspect-video bg-[#f4e4bc] overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.5)] transition-colors duration-300 ${flash === 'gold' ? 'border-4 border-[#ffd700]' : flash === 'red' ? 'border-4 border-red-600' : ''}`}
       style={{
         background: `
           radial-gradient(ellipse at 50% 80%, rgba(139, 69, 19, 0.3) 0%, transparent 50%),
@@ -275,6 +302,21 @@ export const ShadowPuppetStage: React.FC<ShadowPuppetStageProps> = ({
       
       {/* Dragon silhouette */}
       <DragonSilhouette isVisible={showDragon} />
+      
+      {/* FX OVERLAYS */}
+      {fx.type === 'sword' && (
+        <div className="absolute inset-0 pointer-events-none z-20 flex items-center justify-center">
+          <div className="w-64 h-64 border-t-8 border-[#333] rounded-full animate-spin-slow origin-center" style={{ animationDuration: '0.5s' }}></div>
+          <div className="absolute top-1/2 left-1/2 w-40 h-2 bg-[#333] -translate-x-1/2 -translate-y-1/2 rotate-45 animate-slash"></div>
+        </div>
+      )}
+
+      {fx.type === 'fireball' && (
+        <div className="absolute inset-0 pointer-events-none z-20 flex items-center justify-center">
+          <div className="w-0 h-0 bg-orange-500 rounded-full animate-ping opacity-75"></div>
+          <div className="absolute w-32 h-32 bg-red-500 rounded-full animate-pulse opacity-50"></div>
+        </div>
+      )}
       
       {/* Puppet characters */}
       {players.map((player, index) => (
