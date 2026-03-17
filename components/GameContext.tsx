@@ -202,6 +202,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
     });
 
+    // NEW: Auto-generate campaign immediately after host joins
+    // This happens in the background, doesn't block the UI
+    const theme = THEMES[0]; // Default theme, or pass from lobby
+    generateCampaign(theme);
+
     return peer.id;
   };
 
@@ -280,48 +285,73 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // --- Host Logic Removed: Now everyone can do this ---
   const generateCampaign = async (theme: string) => {
+    if (!network.isHost && network.connected) return;
     setIsLoading(true);
-    const campaign = await geminiService.generateFullCampaign(theme);
-    setState(prev => ({ ...prev, campaign }));
     
-    // Broadcast the new campaign to the mesh
-    broadcast({ type: 'SYNC_STATE', payload: { ...state, campaign } });
-    setIsLoading(false);
+    // Generate in background, do NOT block
+    try {
+      const campaign = await geminiService.generateFullCampaign(theme);
+      setState(prev => ({ ...prev, campaign }));
+      console.log("Campaign generated:", campaign.title);
+    } catch (e) {
+      console.error("Campaign gen failed", e);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const startGame = async () => {
+    if (!network.isHost && network.connected) return;
     setIsLoading(true);
-    const location = await getGeoLocation();
-    const introText = await geminiService.startMovie(
-      state.players,
-      location
-    );
     
-    // ROLL INITIATIVE FOR ALL PLAYERS
-    const playersWithInit = state.players.map(p => {
-      const d20 = Math.floor(Math.random() * 20) + 1;
-      const dexMod = Math.floor((p.stats.dex - 10) / 2);
-      const initiative = d20 + dexMod;
-      return { ...p, initiativeRoll: initiative };
-    });
-
-    // SORT BY INITIATIVE (DESCENDING)
-    const sortedPlayers = [...playersWithInit].sort((a, b) => b.initiativeRoll! - a.initiativeRoll!);
-
-    const initialText = state.campaign ? 
-      `**${state.campaign.title}**\n\n${state.campaign.intro}\n\n${introText}` : 
+    // Get location
+    const location = await getGeoLocation();
+    
+    // NEW: If campaign isn't ready yet, start with a prologue
+    let introText = "";
+    let campaign = state.campaign;
+    
+    if (!campaign) {
+      // Generate a quick prologue while the full campaign is building
+      introText = await geminiService.startMovie(state.players, location);
+      // Create a temporary campaign structure
+      campaign = {
+        title: "The Unwritten Chronicle",
+        intro: introText,
+        startSceneId: "prologue",
+        scenes: {
+          "prologue": {
+            id: "prologue",
+            title: "The Beginning",
+            description: "The story begins...",
+            encounterType: "SOCIAL",
+            options: [{ text: "Begin", nextSceneId: "scene_1" }]
+          }
+        }
+      };
+      // Trigger full generation in background
+      generateCampaign(THEMES[0]);
+    } else {
+      introText = await geminiService.startMovie(state.players, location);
+    }
+    
+    const initialText = campaign ? 
+      `**${campaign.title}**\n\n${campaign.intro}\n\n${introText}` : 
       introText;
 
-    const newState = { 
-      ...state, 
-      phase: GamePhase.PLAYING, 
-      mode: GameMode.CINEMATIC, 
-      sceneIndex: 1, 
-      currentSceneId: state.campaign?.startSceneId || '1',
-      players: sortedPlayers, // Update state with sorted list
-      currentTurnPlayerId: sortedPlayers[0]?.id || null, // First player in sorted list
+    const firstPlayer = state.players.sort((a, b) => b.initiativeRoll! - a.initiativeRoll!)[0];
+
+    const newState = {
+      ...state,
+      phase: GamePhase.PLAYING,
+      mode: GameMode.CINEMATIC,
+      sceneIndex: 1,
+      currentSceneId: campaign?.startSceneId || 'prologue',
+      players: state.players.sort((a, b) => b.initiativeRoll! - a.initiativeRoll!), // Sort by initiative
+      currentTurnPlayerId: firstPlayer?.id || null,
       turnCounter: 1,
-      messages: [{ id: 'intro', sender: 'dm', text: initialText, timestamp: Date.now(), isCinematic: true }] 
+      isProcessingTurn: false,
+      messages: [{ id: 'intro', sender: 'dm', text: initialText, timestamp: Date.now(), isCinematic: true }]
     };
     
     setState(newState);
