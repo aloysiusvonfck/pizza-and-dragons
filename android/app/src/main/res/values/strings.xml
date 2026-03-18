@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Pizza &amp; Dragons</string>
+    <string name="title_activity_main">Pizza &amp; Dragons</string>
+    <string name="package_name">com.pizzadragons.app</string>
+    <string name="custom_url_scheme">com.pizzadragons.app</string>
+</resources>
