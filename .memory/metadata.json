@@ -1,7 +1,13 @@
 {
   "version": "1.0.0",
   "created_at": "2026-03-18T17:07:27.135Z",
-  "projects": {},
+  "projects": {
+    "c630e2b1-82ca-4437-a50e-14009a1a217a": {
+      "name": "pizza-and-dragons",
+      "path": "/home/workspace/pizza-and-dragons",
+      "created": "2026-03-18T17:58:38.282Z"
+    }
+  },
   "files": {},
   "user_preferences": {},
   "last_cleanup": "2026-03-18T17:07:27.135Z"

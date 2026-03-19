@@ -159,9 +159,15 @@ export class GeminiService {
       });
 
       return response.text || "The Director is silent...";
+
     } catch (error) {
       console.error("Director Error:", error);
       return "Production Error. Please check API Key.";
+    } finally {
+      if (this.chatSession) {
+        await this.chatSession.close();
+        this.chatSession = null;
+      }
     }
   }
 
@@ -187,8 +193,14 @@ export class GeminiService {
         text: response.text || "Cut!",
         groundingMetadata: response.candidates?.[0]?.groundingMetadata
       };
+
     } catch (error) {
       return { text: "Scene failed to render." };
+    } finally {
+      if (this.chatSession) {
+        await this.chatSession.close();
+        this.chatSession = null;
+      }
     }
   }
 
@@ -218,8 +230,14 @@ export class GeminiService {
         message: prompt
       });
       return response.text || "Scene missing...";
+
     } catch (error) {
       return "Script missing.";
+    } finally {
+      if (this.chatSession) {
+        await this.chatSession.close();
+        this.chatSession = null;
+      }
     }
   }
 
@@ -259,8 +277,14 @@ export class GeminiService {
         text: situationMatch ? situationMatch[1] : "A strange fog rolls in...",
         options: options.length > 0 ? options : ["Press On", "Investigate", "Rest"]
       };
+
     } catch (error) {
       return { text: "The film reel jams...", options: ["Hit it", "Kick it"] };
+    } finally {
+      if (this.chatSession) {
+        await this.chatSession.close();
+        this.chatSession = null;
+      }
     }
   }
 
@@ -278,8 +302,14 @@ export class GeminiService {
         message: prompt
       });
       return response.text || "Action resolved.";
+
     } catch (error) {
       return "Something happened.";
+    } finally {
+      if (this.chatSession) {
+        await this.chatSession.close();
+        this.chatSession = null;
+      }
     }
   }
 }
