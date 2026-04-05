@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useGame } from './GameContext';
-import { Shield, Flame, Ghost, Sword, Scroll, Crown, Dices, Feather, ChevronLeft } from 'lucide-react';
-import { PlayerStats, PlayerProfile } from '../types';
+import { Shield, Flame, Ghost, Sword, Scroll, Crown, Dices, Feather, ChevronLeft, MessageSquare } from 'lucide-react';
+import { PlayerStats, PlayerProfile, CampaignPacingKey } from '../types';
 
 // --- Constants ---
 
@@ -36,7 +36,7 @@ const CLASSES = [
   },
   { 
     id: "Druid", 
-    sub: "Circle of Yeast", 
+    sub: "Circle of Yeast",
     icon: Scroll, 
     desc: "Masters of fermentation, growth, and the natural rise.", 
     stats: "WIS / NAT" 
@@ -57,6 +57,27 @@ const RACES = [
 const THEMES = [
   "Classic Fantasy", "Cyberpunk 2099", "80s Action Movie", "Eldritch Horror", "Post-Apocalyptic", "Space Opera", "Western"
 ];
+
+const PACE_PRESETS: Record<CampaignPacingKey, { key: CampaignPacingKey; name: string; averageLabel: string; helper: string }> = {
+  'quick-bite': {
+    key: 'quick-bite',
+    name: 'Quick Bite',
+    averageLabel: 'about 1 hour on average',
+    helper: 'Fast, punchy, and likely to run a bit shorter or longer depending on player speed.'
+  },
+  'table-talk': {
+    key: 'table-talk',
+    name: 'Table Talk',
+    averageLabel: 'about 2–3 hours on average',
+    helper: 'Balanced pacing for a typical session, with room to flex based on the table.'
+  },
+  'feast': {
+    key: 'feast',
+    name: 'Feast',
+    averageLabel: 'several sessions on average',
+    helper: 'Long-form campaign pacing that can breathe across multiple sessions.'
+  }
+};
 
 const INITIAL_STATS: PlayerStats = { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 };
 
@@ -113,7 +134,6 @@ const StatBox: React.FC<{ label: string; value: number; isRolling: boolean }> = 
     <div className={`text-2xl font-fantasy ${isRolling ? 'text-[#ffd700] animate-pulse blur-[1px]' : 'text-[#cbb692]'}`}>
       {value}
     </div>
-    {/* Modifier calculation: (Score - 10) / 2 rounded down */}
     {!isRolling && (
       <div className="absolute top-1 right-1 text-[8px] text-[#8a7042]">
         {Math.floor((value - 10) / 2) >= 0 ? '+' : ''}{Math.floor((value - 10) / 2)}
@@ -186,13 +206,56 @@ const ClassSelector: React.FC<{ selected: string; onSelect: (c: string) => void 
   </div>
 );
 
+const ChatPanel: React.FC = () => {
+  const { state, myPlayerId, sendPartyMessage } = useGame();
+  const [text, setText] = useState('');
+  const myPlayer = state.players.find(p => p.id === myPlayerId);
+
+  const messages = state.messages.filter(msg => msg.channel === 'party' || msg.sender === 'party');
+
+  return (
+    <div className="border border-[#3d3226] bg-black/60 p-3 flex flex-col gap-3 h-full min-h-[220px]">
+      <div className="flex items-center gap-2 text-[#8a7042] font-fantasy uppercase tracking-widest text-xs border-b border-[#3d3226] pb-2">
+        <MessageSquare size={14} /> Party Chat
+      </div>
+      <div className="flex-1 overflow-y-auto space-y-2 max-h-40 pr-1">
+        {messages.length === 0 ? (
+          <div className="text-xs text-gray-600 italic">The tavern is quiet for now...</div>
+        ) : messages.map(msg => (
+          <div key={msg.id} className="text-xs text-[#cbb692] border-l border-[#3d3226] pl-2">
+            <span className="text-[#8a7042] uppercase tracking-wider mr-2">{msg.playerName || 'Party'}</span>
+            {msg.text}
+          </div>
+        ))}
+      </div>
+      <div className="flex gap-2">
+        <input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder={myPlayer ? 'Speak to the party...' : 'Wait for your hero to appear...'}
+          className="flex-1 bg-black border border-[#5c4d3c] text-[#cbb692] font-serif px-3 py-2 text-sm focus:outline-none focus:border-[#ffd700]"
+        />
+        <button
+          onClick={() => {
+            if (!myPlayer || !text.trim()) return;
+            sendPartyMessage(text.trim(), myPlayer.id, myPlayer.name);
+            setText('');
+          }}
+          className="px-3 py-2 bg-[#1a0f0a] border border-[#8a7042] text-[#ffd700] text-xs font-fantasy uppercase tracking-widest"
+        >
+          Send
+        </button>
+      </div>
+    </div>
+  );
+};
+
 const CharacterCard: React.FC<{ profile: PlayerProfile, onEdit: () => void }> = ({ profile, onEdit }) => {
   const selectedClass = CLASSES.find(c => profile.class.includes(c.id)) || CLASSES[0];
   const Icon = selectedClass.icon;
 
   return (
     <div className="bg-[#1a0f0a] border-2 border-[#5c4d3c] p-6 relative group overflow-hidden max-w-sm mx-auto">
-      {/* Decorative corners */}
       <div className="absolute top-0 left-0 w-8 h-8 border-t-2 border-l-2 border-[#8a7042]"></div>
       <div className="absolute top-0 right-0 w-8 h-8 border-t-2 border-r-2 border-[#8a7042]"></div>
       <div className="absolute bottom-0 left-0 w-8 h-8 border-b-2 border-l-2 border-[#8a7042]"></div>
@@ -223,8 +286,6 @@ const CharacterCard: React.FC<{ profile: PlayerProfile, onEdit: () => void }> = 
            <ChevronLeft size={12} /> Edit Hero
         </button>
       </div>
-      
-      {/* Background glow */}
       <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent z-0"></div>
     </div>
   );
@@ -233,7 +294,7 @@ const CharacterCard: React.FC<{ profile: PlayerProfile, onEdit: () => void }> = 
 // --- Main Lobby Component ---
 
 export default function Lobby() {
-  const { hostGame, joinGame, startGame, state, isLoading } = useGame();
+  const { hostGame, joinGame, startGame, state, isLoading, setCampaignPacing } = useGame();
   
   // Steps: CREATION -> CONNECTION
   const [step, setStep] = useState<'CREATION' | 'CONNECTION'>('CREATION');
@@ -251,6 +312,7 @@ export default function Lobby() {
   const [connectionMode, setConnectionMode] = useState<'HOME' | 'HOST' | 'JOIN'>('HOME');
   const [roomId, setRoomId] = useState('');
   const [theme, setTheme] = useState(THEMES[0]);
+  const [pacingKey, setPacingKey] = useState<CampaignPacingKey>('table-talk');
 
   // --- Logic ---
 
@@ -300,24 +362,13 @@ export default function Lobby() {
 
   const handleFinalizeHero = () => {
     if (name && age) {
-      // NEW: If this is the first player (host), start story generation IMMEDIATELY
-      if (step === 'CREATION' && !state.campaign) {
-        // We are about to become host, trigger story gen now
-        // This will happen in the background
-        const theme = THEMES[0]; 
-        // We can't call generateCampaign here directly because hostGame isn't called yet
-        // Instead, we'll trigger it in the effect when hostGame is called, 
-        // but we can also trigger it here if we are already connected?
-        // Better: Trigger it in the 'CONNECTION' step when we are ready to host.
-        setStep('CONNECTION');
-      } else {
-        setStep('CONNECTION');
-      }
+      setStep('CONNECTION');
     }
   };
 
   const handleHostSetup = async () => {
-    await hostGame(getProfile());
+    setCampaignPacing(pacingKey);
+    await hostGame(getProfile(), theme);
     setConnectionMode('HOST');
   };
 
@@ -350,7 +401,7 @@ export default function Lobby() {
               </div>
             </div>
 
-            <div className="flex-1 flex flex-col justify-between">
+            <div className="flex-1 flex flex-col justify-between gap-4">
               <div>
                 <h2 className="text-xl font-fantasy text-[#cbb692] mb-4 flex items-center gap-2">
                    <Crown size={20} className="text-[#ffd700]" /> Party Gathering
@@ -365,18 +416,37 @@ export default function Lobby() {
                   ))}
                   {state.players.length === 0 && <div className="text-gray-600 italic">Summoning heroes...</div>}
                 </div>
-                
+
                 <div className="bg-[#111] p-3 border border-[#333] mb-4 text-center">
                    <div className="text-[10px] text-gray-500 uppercase tracking-widest mb-1">Room Glyph</div>
-                   <div className="text-[#ffd700] font-mono text-xl tracking-widest select-all cursor-pointer hover:text-white" onClick={() => navigator.clipboard.writeText(state.network.roomId || "")}>
-                     {state.network.roomId}
-                   </div>
+                   <div className="text-[#ffd700] font-mono text-xl tracking-widest select-all cursor-pointer hover:text-white" onClick={() => navigator.clipboard.writeText(state.network.roomId || "")}>{state.network.roomId}</div>
                 </div>
               </div>
 
-              <GothicButton onClick={startGame} disabled={isLoading || state.players.length === 0}>
+              <div className="space-y-3">
+                <div>
+                  <div className="text-[10px] text-gray-500 uppercase tracking-widest mb-2">Campaign Pace</div>
+                  <div className="grid grid-cols-1 gap-2">
+                    {(Object.values(PACE_PRESETS)).map(preset => (
+                      <button
+                        key={preset.key}
+                        onClick={() => setPacingKey(preset.key)}
+                        className={`text-left p-3 border transition-all ${pacingKey === preset.key ? 'border-[#ffd700] bg-[#2a1d15]' : 'border-[#333] bg-black/60'}`}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="font-fantasy text-[#cbb692]">{preset.name}</span>
+                          <span className="text-[10px] text-[#8a7042]">{preset.averageLabel}</span>
+                        </div>
+                        <div className="text-[10px] text-gray-500 mt-1">{preset.helper}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <GothicButton onClick={startGame} disabled={isLoading || state.players.length === 0}>
                  {isLoading ? 'Weaving Fate...' : 'Embark on Quest'}
-              </GothicButton>
+                </GothicButton>
+              </div>
             </div>
           </div>
         </GothicCard>
@@ -397,6 +467,9 @@ export default function Lobby() {
           </div>
           <p className="text-gray-500 font-serif italic">"Patience is a virtue, but pizza is eternal."</p>
           <div className="mt-8 text-xs text-[#555]">Connected as {name}</div>
+          <div className="mt-6">
+            <ChatPanel />
+          </div>
         </GothicCard>
       </div>
     );

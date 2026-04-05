@@ -1,9 +1,13 @@
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
-import { Campaign, Player } from "../types";
+import { Campaign, Player, CampaignPacing } from "../types";
 
 const SYSTEM_INSTRUCTION = `
 You are the DIRECTOR of "Pizza & Dragons: The Movie". 
 This is NOT a slow-paced text adventure. This is a HIGH-OCTANE MONTAGE of a D&D campaign.
+
+The world should feel like a tavern that serves pizza: warm, crowded, dramatic, and lit by a wood-fired pizza oven.
+The action should be staged like a shadow puppet theatre cast by the oven glow.
+The audience should feel the silhouettes, sparks, and crust-light before the full UI reveal.
 
 Your Goal: Guide the party through 3 Action Scenes and 1 Finale at a Pizza Place.
 
@@ -34,6 +38,9 @@ export class GeminiService {
     
     THEME: ${theme}.
     
+    Open with a tavern-pizzeria atmosphere: the first scene should feel like a bustling pizza tavern with the whole story illuminated by a pizza oven and performed as shadow puppet theatre.
+    The opening must clearly establish that the game begins in a dramatic tavern serving pizza before the adventure expands.
+    
     **CRITICAL INSTRUCTION:**
     Do NOT generate the entire story. We need to start IMMEDIATELY.
     
@@ -45,7 +52,7 @@ export class GeminiService {
        - For **EACH** of the 3 choices above, generate the **immediate next scene** that would happen if that choice is taken.
        - These are "Look-Ahead" scenes. Do NOT generate Scene 3 or beyond.
     
-    3. **Output Format (Strict JSON):**
+    3. **Output Format (Strict JSON):
     {
       "title": "...",
       "intro": "...",
@@ -135,6 +142,10 @@ export class GeminiService {
     ).join("\n");
 
     const prompt = `
+    Open with the party gathered in a tavern that serves pizza.
+    The room is warm, smoky, and loud, with the action staged as shadow puppet theatre thrown by the glow of a wood-fired pizza oven.
+    The first lines should clearly establish the tavern-pizzeria setting before the adventure begins.
+
     ACT 1. INTRO.
     The Cast:
     ${castList}

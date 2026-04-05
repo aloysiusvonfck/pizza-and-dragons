@@ -9,6 +9,19 @@ export enum GameMode {
   MONTAGE = 'MONTAGE'      // Mini-game & Decision making
 }
 
+export type CampaignPacingKey = 'quick-bite' | 'table-talk' | 'feast';
+
+export interface CampaignPacing {
+  key: CampaignPacingKey;
+  name: string;
+  averageLabel: string;
+  averageMinutes: number;
+  minScenes: number;
+  maxScenes: number;
+  branchingFactor: number;
+  sideQuestBudget: number;
+}
+
 export interface PlayerStats {
   str: number;
   dex: number;
@@ -43,14 +56,14 @@ export interface PlayerProfile {
 
 export interface ChatMessage {
   id: string;
-  sender: 'dm' | 'player' | 'system' | 'meta';
+  sender: 'dm' | 'player' | 'system' | 'meta' | 'party';
   playerName?: string;
   text: string;
   timestamp: number;
   groundingMetadata?: GroundingMetadata;
   diceRoll?: number;
   isCinematic?: boolean;
-  channel?: 'narrative' | 'meta';
+  channel?: 'narrative' | 'meta' | 'party';
 }
 
 export interface GroundingMetadata {
@@ -60,7 +73,7 @@ export interface GroundingMetadata {
       uri: string; 
       title: string;
       placeAnswerSources?: { reviewSnippets?: { content: string }[] }[]
-    };
+    }[];
   }[];
 }
 
@@ -112,6 +125,7 @@ export interface GameState {
   pizza: PizzaState;
   montage: MontageState;
   campaign: Campaign | null; // The pre-generated story
+  campaignPacing: CampaignPacing;
   currentSceneId: string | null;
   // NEW: Turn Management
   currentTurnPlayerId: string | null; // Who can act right now?
@@ -132,21 +146,25 @@ export type NetworkMessage =
   | { type: 'PLAYER_JOIN'; payload: Player }
   | { type: 'PLAYER_ACTION'; payload: { text: string; playerId: string } }
   | { type: 'MONTAGE_DECISION'; payload: { choice: string; playerId: string } }
-  | { type: 'MINIGAME_COMPLETE'; payload: { score: number } };
+  | { type: 'MINIGAME_COMPLETE'; payload: { score: number } }
+  | { type: 'PARTY_CHAT'; payload: { text: string; playerId: string; playerName: string } };
 
 export interface GameContextType {
   state: GameState;
   network: NetworkState;
   // Actions
-  hostGame: (profile: PlayerProfile) => Promise<string>;
+  hostGame: (profile: PlayerProfile, theme: string) => Promise<string>;
   joinGame: (roomId: string, profile: PlayerProfile) => Promise<void>;
   generateCampaign: (theme: string) => Promise<void>;
   startGame: () => void;
   sendPlayerAction: (text: string, playerId: string) => Promise<void>;
+  sendPartyMessage: (text: string, playerId: string, playerName: string) => void;
   completeMinigame: (successCount: number) => void;
   makeMontageDecision: (choice: string) => void;
   resetGame: () => void;
   finishGame: () => void;
+  setCampaignPacing: (pacingKey: CampaignPacingKey) => void;
   isLoading: boolean;
   myPlayerId: string | null;
+  expandStoryBranch: (currentSceneId: string) => Promise<void>;
 }

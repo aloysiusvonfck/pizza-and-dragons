@@ -5,6 +5,69 @@ import { GameMode } from '../types';
 import { ShadowPuppetStage } from './ShadowPuppetStage';
 import { audioService } from '../services/AudioService';
 
+const SceneTransitionOverlay: React.FC<{ title: string; description: string; active: boolean }> = ({ title, description, active }) => {
+  if (!active) return null;
+
+  return (
+    <div className="fixed inset-0 z-[120] pointer-events-none overflow-hidden">
+      <div className="absolute inset-0 bg-black/95 animate-[fadeOut_2.4s_ease-in-out_forwards]" />
+      <div className="absolute inset-0 flex items-center justify-center">
+        <div className="relative w-[92vw] max-w-5xl aspect-video">
+          <div className="absolute inset-0 bg-gradient-to-b from-amber-950/90 via-black/90 to-black/95" />
+          <div className="absolute inset-0 opacity-70 bg-[radial-gradient(circle_at_center,rgba(255,140,0,0.25)_0%,rgba(0,0,0,0)_55%)]" />
+          <div className="absolute inset-x-0 bottom-0 h-2/5 bg-gradient-to-t from-black via-black/30 to-transparent" />
+          <div className="absolute left-1/2 bottom-8 -translate-x-1/2 w-60 h-40 rounded-full bg-amber-500/20 blur-3xl" />
+
+          <div className="absolute inset-0 flex flex-col items-center justify-center">
+            <div className="relative w-48 h-64 mb-8 animate-[morphStage_2.2s_ease-in-out_forwards]">
+              <div className="absolute inset-0 rounded-t-[3rem] border-4 border-stone-800 bg-gradient-to-b from-stone-700 via-stone-900 to-black shadow-[0_0_40px_rgba(0,0,0,0.7)]" />
+              <div className="absolute inset-4 top-8 rounded-t-[2rem] bg-black/90" />
+              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 w-32 h-20 rounded-full bg-orange-500/50 blur-xl" />
+            </div>
+
+            <div className="relative mb-8 w-full max-w-3xl h-72 animate-[shadowToUI_2.2s_ease-in-out_forwards]">
+              <div className="absolute inset-0 flex items-end justify-center gap-6 opacity-90">
+                <div className="w-20 h-44 bg-black rounded-t-[40%] rotate-[-6deg] shadow-[0_0_30px_rgba(0,0,0,0.8)]" />
+                <div className="w-22 h-52 bg-black rounded-t-[45%] shadow-[0_0_30px_rgba(0,0,0,0.8)]" />
+                <div className="w-20 h-40 bg-black rounded-t-[40%] rotate-[7deg] shadow-[0_0_30px_rgba(0,0,0,0.8)]" />
+              </div>
+              <div className="absolute inset-0 flex items-center justify-center opacity-0 animate-[uiReveal_2.2s_ease-in-out_forwards]">
+                <div className="w-full h-full rounded-3xl border border-[#3d3226] bg-[#0c0c0c]/95 shadow-[0_0_60px_rgba(0,0,0,0.85)] p-6 text-center text-[#cbb692]">
+                  <div className="text-xs uppercase tracking-[0.4em] text-[#8a7042] mb-3 font-fantasy">The Scene Awakens</div>
+                  <div className="text-3xl md:text-5xl font-fantasy text-[#ffd700] mb-3">{title}</div>
+                  <div className="max-w-2xl mx-auto text-sm md:text-lg font-serif italic text-[#d6c09b] leading-relaxed">{description}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <style>{`
+        @keyframes fadeOut {
+          0% { opacity: 1; }
+          85% { opacity: 1; }
+          100% { opacity: 0; }
+        }
+        @keyframes morphStage {
+          0% { transform: scale(1) translateY(0); opacity: 1; }
+          55% { transform: scale(1.02) translateY(-4px); opacity: 1; }
+          100% { transform: scale(0.76) translateY(-18px); opacity: 0; }
+        }
+        @keyframes shadowToUI {
+          0% { transform: scale(1) translateY(0); opacity: 1; filter: blur(0px); }
+          55% { transform: scale(0.98) translateY(-4px); opacity: 0.95; filter: blur(0.5px); }
+          100% { transform: scale(1.02) translateY(0); opacity: 0; filter: blur(6px); }
+        }
+        @keyframes uiReveal {
+          0% { opacity: 0; transform: scale(0.96); filter: blur(10px); }
+          55% { opacity: 0.25; transform: scale(0.99); filter: blur(3px); }
+          100% { opacity: 1; transform: scale(1); filter: blur(0px); }
+        }
+      `}</style>
+    </div>
+  );
+};
+
 // --- Styled Components ---
 
 const GothicPanel: React.FC<{ children: React.ReactNode; className?: string }> = ({ children, className = "" }) => (
@@ -368,7 +431,10 @@ const GameSession: React.FC = () => {
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const [isMetaMode, setIsMetaMode] = useState(false); // NEW: Meta-chat toggle
   const [showErrorMenu, setShowErrorMenu] = useState(false); // NEW: Error menu toggle
-  
+  const [sceneTransition, setSceneTransition] = useState<{ active: boolean; title: string; description: string }>({ active: false, title: '', description: '' });
+  const lastSceneRef = useRef<string | null>(null);
+  const lastActRef = useRef<number>(0);
+
   // NEW: D20 Animation State
   const [d20Animation, setD20Animation] = useState<{
     roll: number;
@@ -541,8 +607,33 @@ const GameSession: React.FC = () => {
     if (rollResult === 1) audioService.playFail();
   }, [rollResult]);
 
+  const activeAct = Math.max(1, state.sceneIndex);
+  useEffect(() => {
+    const sceneChanged = state.currentSceneId && state.currentSceneId !== lastSceneRef.current;
+    const actChanged = activeAct !== lastActRef.current;
+    if (!sceneChanged && !actChanged) return;
+
+    lastSceneRef.current = state.currentSceneId;
+    lastActRef.current = activeAct;
+
+    const currentScene = state.campaign?.scenes?.[state.currentSceneId || ''];
+    setSceneTransition({
+      active: true,
+      title: currentScene?.title || `Act ${activeAct}`,
+      description: currentScene?.description || state.messages[state.messages.length - 1]?.text || 'The next scene emerges from the oven glow.'
+    });
+
+    const timer = window.setTimeout(() => {
+      setSceneTransition(prev => ({ ...prev, active: false }));
+    }, 2400);
+
+    return () => window.clearTimeout(timer);
+  }, [state.currentSceneId, state.sceneIndex, state.campaign, state.messages]);
+
   return (
     <div className="flex flex-col h-screen max-w-7xl mx-auto md:flex-row overflow-hidden relative bg-black">
+      <SceneTransitionOverlay title={sceneTransition.title} description={sceneTransition.description} active={sceneTransition.active} />
+
       {/* MOBILE DRAWER OVERLAY */}
       {isDrawerOpen && (
         <div 

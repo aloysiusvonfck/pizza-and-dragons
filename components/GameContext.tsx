@@ -1,8 +1,46 @@
 import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
-import { GameState, GamePhase, GameMode, GameContextType, Player, ChatMessage, NetworkState, NetworkMessage, PlayerProfile } from '../types';
+import { GameState, GamePhase, GameMode, GameContextType, Player, ChatMessage, NetworkState, NetworkMessage, PlayerProfile, CampaignPacing, CampaignPacingKey } from '../types';
 import { geminiService } from '../services/geminiService';
 import Peer, { DataConnection } from 'peerjs';
 import { agentService } from '../services/AgentService';
+
+const PACE_PRESETS: Record<CampaignPacingKey, CampaignPacing> = {
+  'quick-bite': {
+    key: 'quick-bite',
+    name: 'Quick Bite',
+    averageLabel: 'about 1 hour on average',
+    averageMinutes: 60,
+    minScenes: 3,
+    maxScenes: 4,
+    branchingFactor: 2,
+    sideQuestBudget: 1
+  },
+  'table-talk': {
+    key: 'table-talk',
+    name: 'Table Talk',
+    averageLabel: 'about 2–3 hours on average',
+    averageMinutes: 150,
+    minScenes: 5,
+    maxScenes: 7,
+    branchingFactor: 3,
+    sideQuestBudget: 2
+  },
+  'feast': {
+    key: 'feast',
+    name: 'Feast',
+    averageLabel: 'several sessions on average',
+    averageMinutes: 360,
+    minScenes: 9,
+    maxScenes: 14,
+    branchingFactor: 4,
+    sideQuestBudget: 4
+  }
+};
+
+const defaultPacing = PACE_PRESETS['table-talk'];
+const SAVE_KEY = 'pizza_dragons_state';
+const SNAPSHOT_KEY = 'pizza_dragons_snapshot';
+const CHAPTER_KEY = 'pizza_dragons_campaign';
 
 const defaultState: GameState = {
   phase: GamePhase.LOBBY,
@@ -25,6 +63,7 @@ const defaultState: GameState = {
     options: []
   },
   campaign: null,
+  campaignPacing: defaultPacing,
   currentSceneId: null,
   currentTurnPlayerId: null,
   turnCounter: 0,
@@ -39,69 +78,59 @@ export const useGame = () => {
   return context;
 };
 
-// --- NEW: Persistence Hooks ---
-const usePersistence = () => {
- const SAVE_KEY = 'pizza_dragons_state';
-
- // Load state on mount
- useEffect(() => {
-  const saved = localStorage.getItem(SAVE_KEY);
-  if (saved) {
-   try {
-    const parsed = JSON.parse(saved);
-    // Merge with default state to ensure new fields exist
-    setState(prev => ({ ...prev, ...parsed }));
-   } catch (e) {
-    console.error("Failed to load saved state", e);
-   }
+const safeParseState = (value: string | null): Partial<GameState> | null => {
+  if (!value) return null;
+  try {
+    return JSON.parse(value) as Partial<GameState>;
+  } catch {
+    return null;
   }
- }, []);
-
- // Save state on change (debounced)
- useEffect(() => {
-  const timeout = setTimeout(() => {
-   localStorage.setItem(SAVE_KEY, JSON.stringify(state));
-  }, 30000); // Save every 30s
-
-  return () => clearTimeout(timeout);
- }, [state]);
-
- const clearSave = () => {
-  localStorage.removeItem(SAVE_KEY);
- };
-
- return { clearSave };
 };
 
 export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [state, setState] = useState<GameState>(defaultState);
+  const [state, setState] = useState<GameState>(() => {
+    const saved = safeParseState(localStorage.getItem(SAVE_KEY));
+    return { ...defaultState, ...(saved || {}), campaignPacing: saved?.campaignPacing || defaultPacing };
+  });
   const [isLoading, setIsLoading] = useState(false);
   const [network, setNetwork] = useState<NetworkState>({
-    isHost: false, // Kept for UI only, logic is now distributed
+    isHost: false,
     roomId: null,
     peerId: null,
     connected: false
   });
   const [myPlayerId, setMyPlayerId] = useState<string | null>(null);
-  const { clearSave } = usePersistence();
 
-  // Refs for networking to avoid stale closures in callbacks
   const peerRef = useRef<Peer | null>(null);
   const connectionsRef = useRef<DataConnection[]>([]);
   const stateRef = useRef<GameState>(state);
-
-  // Track connected peers (simple version: assume all peers in connectionsRef are connected)
+  const snapshotRef = useRef<GameState>(state);
+  const saveTimerRef = useRef<number | null>(null);
   const [connectedPeers, setConnectedPeers] = useState<string[]>([]);
 
-  // Update connected peers when connections change
   useEffect(() => {
-    const peers = connectionsRef.current
-      .filter(c => c.open)
-      .map(c => c.peerId);
-    setConnectedPeers(peers);
-  }, [state]); // Re-run when state changes (could be optimized with a ref)
+    stateRef.current = state;
+    snapshotRef.current = state;
+    if (saveTimerRef.current) {
+      window.clearTimeout(saveTimerRef.current);
+    }
+    saveTimerRef.current = window.setTimeout(() => {
+      localStorage.setItem(SAVE_KEY, JSON.stringify(stateRef.current));
+      localStorage.setItem(SNAPSHOT_KEY, JSON.stringify({
+        updatedAt: Date.now(),
+        state: stateRef.current
+      }));
+    }, 1500);
+    if (network.isHost && network.connected) {
+      broadcast({ type: 'SYNC_STATE', payload: state });
+    }
+  }, [state, network.isHost, network.connected]);
 
-  // Check for disconnected players and trigger agent
+  useEffect(() => {
+    const peers = connectionsRef.current.filter(c => c.open).map(c => c.peerId);
+    setConnectedPeers(peers);
+  }, [state]);
+
   useEffect(() => {
     if (state.phase !== GamePhase.PLAYING) return;
     if (state.isProcessingTurn) return;
@@ -109,26 +138,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const currentPlayer = state.players.find(p => p.id === state.currentTurnPlayerId);
     if (!currentPlayer) return;
 
-    // If the current player is NOT in the connected peers list, trigger agent
     const isPlayerConnected = connectedPeers.includes(currentPlayer.id) || currentPlayer.id === myPlayerId;
-    
     if (!isPlayerConnected) {
       console.log(`Player ${currentPlayer.name} is offline. Triggering AI Agent.`);
       handleAgentTurn(currentPlayer);
     }
   }, [state.currentTurnPlayerId, connectedPeers, state.phase]);
 
-  // Keep state ref in sync
-  useEffect(() => {
-    stateRef.current = state;
-    // If we are host, broadcast state on change (debounced slightly in real app, but direct here)
-    if (network.isHost && network.connected) {
-      broadcast({ type: 'SYNC_STATE', payload: state });
-    }
-  }, [state, network.isHost, network.connected]);
-
-  // --- Networking Helpers ---
-  // Now we broadcast to ALL peers, not just "clients"
   const broadcast = (msg: NetworkMessage) => {
     connectionsRef.current.forEach(conn => {
       if (conn.open) conn.send(msg);
@@ -136,60 +152,77 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const sendToHost = (msg: NetworkMessage) => {
-    const conn = connectionsRef.current[0]; // Clients only have one connection (to host)
+    const conn = connectionsRef.current[0];
     if (conn && conn.open) conn.send(msg);
   };
 
-  // --- Initialization & Peer Setup ---
+  const persistSnapshot = (nextState: GameState) => {
+    snapshotRef.current = nextState;
+    localStorage.setItem(SAVE_KEY, JSON.stringify(nextState));
+    localStorage.setItem(SNAPSHOT_KEY, JSON.stringify({
+      updatedAt: Date.now(),
+      state: nextState
+    }));
+  };
+
+  const pushState = (nextState: GameState, broadcastState = true) => {
+    setState(nextState);
+    persistSnapshot(nextState);
+    if (broadcastState) {
+      broadcast({ type: 'SYNC_STATE', payload: nextState });
+    }
+  };
 
   const initializePeer = async (): Promise<Peer> => {
     const { Peer } = await import('peerjs');
     const peer = new Peer(undefined as any, { debug: 1 });
     peerRef.current = peer;
-    
+
     return new Promise((resolve, reject) => {
       peer.on('open', (id) => {
         setNetwork(prev => ({ ...prev, peerId: id, connected: true }));
         resolve(peer);
       });
       peer.on('error', (err) => {
-        console.error("Peer Error:", err);
+        console.error('Peer Error:', err);
         reject(err);
       });
     });
   };
 
-  const hostGame = async (profile: PlayerProfile): Promise<string> => {
+  const setCampaignPacing = (pacingKey: CampaignPacingKey) => {
+    const pacing = PACE_PRESETS[pacingKey] || defaultPacing;
+    pushState({ ...stateRef.current, campaignPacing: pacing }, true);
+  };
+
+  const hostGame = async (profile: PlayerProfile, theme: string): Promise<string> => {
     const peer = await initializePeer();
     setNetwork(prev => ({ ...prev, isHost: true, roomId: peer.id }));
-    
-    // Add Host Player Locally
+
     const newPlayer: Player = {
-        id: peer.id, 
-        name: profile.name,
-        race: profile.race,
-        class: profile.class,
-        age: profile.age,
-        stats: profile.stats,
-        description: profile.description,
-        contributions: 0,
-        level: 1,
-        isHost: true
+      id: peer.id,
+      name: profile.name,
+      race: profile.race,
+      class: profile.class,
+      age: profile.age,
+      stats: profile.stats,
+      description: profile.description,
+      contributions: 0,
+      level: 1,
+      isHost: true
     };
     setMyPlayerId(newPlayer.id);
-    setState(prev => ({ ...prev, players: [...prev.players, newPlayer] }));
-    
-    // Initialize Gemini Service with Env Key
+    pushState({ ...stateRef.current, players: [...stateRef.current.players, newPlayer] }, true);
+
     const envKey = process.env.API_KEY || '';
     if (!envKey) {
-      console.warn("API_KEY not found in environment variables. Game may not function correctly.");
+      console.warn('API_KEY not found in environment variables. Game may not function correctly.');
     }
     geminiService.initialize(envKey);
-    
+
     peer.on('connection', (conn) => {
       conn.on('open', () => {
         connectionsRef.current.push(conn);
-        // Send immediate sync
         conn.send({ type: 'SYNC_STATE', payload: stateRef.current });
       });
 
@@ -202,15 +235,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
     });
 
-    // NEW: Start Story Generation IMMEDIATELY upon hosting
-    // This is the "Dungeon Architect" phase - building the full story bible
     setIsLoading(true);
-    const theme = THEMES[0]; // Or pass from lobby state
-    
-    // We call generateCampaign which now builds the FULL story in background
-    // The game can still be started before it finishes (prologue mode)
-    generateCampaign(theme);
-
+    await generateCampaign(theme);
     return peer.id;
   };
 
@@ -223,11 +249,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     return new Promise<void>((resolve, reject) => {
       conn.on('open', () => {
-        // Create local player ID
         const pid = peer.id || Date.now().toString();
         setMyPlayerId(pid);
-        
-        // Send Join Request
+
         const newPlayer: Player = {
           id: pid,
           name: profile.name,
@@ -241,8 +265,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           isHost: false
         };
 
-        conn.send({ 
-          type: 'PLAYER_JOIN', 
+        conn.send({
+          type: 'PLAYER_JOIN',
           payload: newPlayer
         });
         resolve();
@@ -253,21 +277,26 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
 
       conn.on('error', (err) => {
-        console.error("Connection Error", err);
+        console.error('Connection Error', err);
         reject(err);
       });
     });
   };
 
-  // --- Message Handling ---
-
   const handleHostMessage = async (msg: NetworkMessage) => {
     switch (msg.type) {
       case 'PLAYER_JOIN':
-        setState(prev => ({
-          ...prev,
-          players: [...prev.players, msg.payload]
-        }));
+        pushState({
+          ...stateRef.current,
+          players: [...stateRef.current.players, msg.payload],
+          messages: [...stateRef.current.messages, {
+            id: Date.now().toString(),
+            sender: 'system',
+            text: `${msg.payload.name} arrives at the tavern.` ,
+            timestamp: Date.now(),
+            channel: 'party'
+          }]
+        });
         break;
       case 'PLAYER_ACTION':
         await sendPlayerAction(msg.payload.text, msg.payload.playerId);
@@ -278,27 +307,38 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       case 'MINIGAME_COMPLETE':
         await completeMinigame(msg.payload.score);
         break;
+      case 'PARTY_CHAT':
+        pushState({
+          ...stateRef.current,
+          messages: [...stateRef.current.messages, {
+            id: Date.now().toString(),
+            sender: 'party',
+            playerName: msg.payload.playerName,
+            text: msg.payload.text,
+            timestamp: Date.now(),
+            channel: 'party'
+          }]
+        });
+        break;
     }
   };
 
   const handleClientMessage = (msg: NetworkMessage) => {
     if (msg.type === 'SYNC_STATE') {
-      setState(msg.payload);
+      pushState(msg.payload, false);
     }
   };
 
-  // --- Host Logic Removed: Now everyone can do this ---
   const generateCampaign = async (theme: string) => {
     if (!network.isHost && network.connected) return;
     setIsLoading(true);
-    
-    // Generate in background, do NOT block
+
     try {
       const campaign = await geminiService.generateFullCampaign(theme);
-      setState(prev => ({ ...prev, campaign }));
-      console.log("Campaign generated:", campaign.title);
+      pushState({ ...stateRef.current, campaign }, true);
+      console.log('Campaign generated:', campaign.title);
     } catch (e) {
-      console.error("Campaign gen failed", e);
+      console.error('Campaign gen failed', e);
     } finally {
       setIsLoading(false);
     }
@@ -307,83 +347,95 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const startGame = async () => {
     if (!network.isHost && network.connected) return;
     setIsLoading(true);
-    
-    // Get location
+
     const location = await getGeoLocation();
-    
-    // NEW: If campaign isn't ready yet, start with a prologue
-    let introText = "";
-    let campaign = state.campaign;
-    
+    let introText = '';
+    let campaign = stateRef.current.campaign;
+
     if (!campaign) {
-      // Generate a quick prologue while the full campaign is building
-      introText = await geminiService.startMovie(state.players, location);
-      // Create a temporary campaign structure
+      introText = await geminiService.startMovie(stateRef.current.players, location);
       campaign = {
-        title: "The Unwritten Chronicle",
+        title: 'The Unwritten Chronicle',
         intro: introText,
-        startSceneId: "prologue",
+        startSceneId: 'prologue',
         scenes: {
-          "prologue": {
-            id: "prologue",
-            title: "The Beginning",
-            description: "The story begins...",
-            encounterType: "SOCIAL",
-            options: [{ text: "Begin", nextSceneId: "scene_1" }]
+          prologue: {
+            id: 'prologue',
+            title: 'The Beginning',
+            description: 'The story begins...',
+            encounterType: 'SOCIAL',
+            options: [{ text: 'Begin', nextSceneId: 'scene_1' }]
           }
         }
       };
-      // Trigger full generation in background
-      generateCampaign(THEMES[0]);
+      generateCampaign(stateRef.current.campaignPacing.key === 'quick-bite' ? 'Classic Fantasy' : 'Classic Fantasy');
     } else {
-      introText = await geminiService.startMovie(state.players, location);
+      introText = await geminiService.startMovie(stateRef.current.players, location);
     }
-    
-    const initialText = campaign ? 
-      `**${campaign.title}**\n\n${campaign.intro}\n\n${introText}` : 
+
+    const initialText = campaign ?
+      `**${campaign.title}**\n\n${campaign.intro}\n\n${introText}` :
       introText;
 
-    const firstPlayer = state.players.sort((a, b) => b.initiativeRoll! - a.initiativeRoll!)[0];
+    const firstPlayer = [...stateRef.current.players].sort((a, b) => (b.initiativeRoll || 0) - (a.initiativeRoll || 0))[0];
 
     const newState = {
-      ...state,
+      ...stateRef.current,
       phase: GamePhase.PLAYING,
       mode: GameMode.CINEMATIC,
       sceneIndex: 1,
       currentSceneId: campaign?.startSceneId || 'prologue',
-      players: state.players.sort((a, b) => b.initiativeRoll! - a.initiativeRoll!), // Sort by initiative
+      players: [...stateRef.current.players].sort((a, b) => (b.initiativeRoll || 0) - (a.initiativeRoll || 0)),
       currentTurnPlayerId: firstPlayer?.id || null,
       turnCounter: 1,
       isProcessingTurn: false,
       messages: [{ id: 'intro', sender: 'dm', text: initialText, timestamp: Date.now(), isCinematic: true }]
     };
-    
-    setState(newState);
-    broadcast({ type: 'SYNC_STATE', payload: newState });
+
+    pushState(newState, true);
     setIsLoading(false);
   };
 
+  const sendPartyMessage = (text: string, playerId: string, playerName: string) => {
+    const message = {
+      id: Date.now().toString(),
+      sender: 'party' as const,
+      playerName,
+      text,
+      timestamp: Date.now(),
+      channel: 'party' as const
+    };
+
+    const nextState = {
+      ...stateRef.current,
+      messages: [...stateRef.current.messages, message]
+    };
+
+    pushState(nextState, true);
+    sendToHost({
+      type: 'PARTY_CHAT',
+      payload: { text, playerId, playerName }
+    });
+  };
+
   const sendPlayerAction = async (text: string, playerId: string, channel: 'narrative' | 'meta' = 'narrative') => {
-    // TURN LOCK: Only the active player can act
-    if (playerId !== state.currentTurnPlayerId) {
-      console.warn("Not your turn!");
-      return; // Ignore action
+    if (playerId !== stateRef.current.currentTurnPlayerId) {
+      console.warn('Not your turn!');
+      return;
     }
 
-    // Lock the turn
-    if (state.isProcessingTurn) {
-      console.warn("Turn already processing!");
+    if (stateRef.current.isProcessingTurn) {
+      console.warn('Turn already processing!');
       return;
     }
 
     setIsLoading(true);
-    const player = state.players.find(p => p.id === playerId);
+    const player = stateRef.current.players.find(p => p.id === playerId);
 
-    // If meta, just broadcast the message without AI processing
     if (channel === 'meta') {
       const newState = {
-        ...state,
-        messages: [...state.messages, {
+        ...stateRef.current,
+        messages: [...stateRef.current.messages, {
           id: Date.now().toString(),
           sender: 'meta',
           playerName: player?.name,
@@ -392,19 +444,17 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           channel: 'meta'
         }]
       };
-      setState(newState);
-      broadcast({ type: 'SYNC_STATE', payload: newState });
+      pushState(newState, true);
       return;
     }
 
     const roll = Math.floor(Math.random() * 20) + 1;
     const boostedRoll = roll + (player ? player.level - 1 : 0);
 
-    // Optimistic update with turn lock
     const optimisticState = {
-      ...state,
-      isProcessingTurn: true, // Lock
-      messages: [...state.messages, {
+      ...stateRef.current,
+      isProcessingTurn: true,
+      messages: [...stateRef.current.messages, {
         id: Date.now().toString(),
         sender: 'player',
         playerName: player?.name || 'Actor',
@@ -412,41 +462,32 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         timestamp: Date.now(),
         diceRoll: boostedRoll
       }],
-      players: state.players.map(p => p.id === playerId ? { ...p, contributions: p.contributions + 1 } : p)
+      players: stateRef.current.players.map(p => p.id === playerId ? { ...p, contributions: p.contributions + 1 } : p)
     };
-    setState(optimisticState);
+    pushState(optimisticState, true);
 
-    // AI Resolution (Local)
     const location = await getGeoLocation();
     const response = await geminiService.resolveActionAndCut(
       `[Roll: ${boostedRoll}] ${text}`,
-      Math.max(...state.players.map(p => p.level)),
+      Math.max(...stateRef.current.players.map(p => p.level)),
       location
     );
     parseInventoryUpdate(response.text);
 
-    // Determine next player (simple round-robin for now)
-    const currentPlayerIndex = state.players.findIndex(p => p.id === playerId);
-    const nextPlayerIndex = (currentPlayerIndex + 1) % state.players.length;
-    const nextPlayer = state.players[nextPlayerIndex];
+    const currentPlayerIndex = stateRef.current.players.findIndex(p => p.id === playerId);
+    const nextPlayerIndex = (currentPlayerIndex + 1) % stateRef.current.players.length;
+    const nextPlayer = stateRef.current.players[nextPlayerIndex];
 
-    // Determine next scene (if applicable)
     let nextSceneId = null;
-    if (state.campaign && state.currentSceneId) {
-      const currentScene = state.campaign.scenes[state.currentSceneId];
-      // If the action text matches one of the options, use that nextSceneId
-      // For now, we'll just use the first option as a placeholder (AI should resolve this)
-      // TODO: Parse AI response to find the actual next scene ID
+    if (stateRef.current.campaign && stateRef.current.currentSceneId) {
+      const currentScene = stateRef.current.campaign.scenes[stateRef.current.currentSceneId];
       if (currentScene.options && currentScene.options.length > 0) {
-        nextSceneId = currentScene.options[0].nextSceneId; // Placeholder
+        nextSceneId = currentScene.options[0].nextSceneId;
       }
     }
 
-    // Check if we need to expand the story (lazy loading)
-    if (nextSceneId && state.campaign && !state.campaign.scenes[nextSceneId]) {
-      // This scene doesn't exist yet! Trigger expansion.
-      // Note: We'll do this in the background, not blocking the turn.
-      setTimeout(() => expandStoryBranch(state.currentSceneId), 1000);
+    if (nextSceneId && stateRef.current.campaign && !stateRef.current.campaign.scenes[nextSceneId]) {
+      setTimeout(() => expandStoryBranch(stateRef.current.currentSceneId || ''), 1000);
     }
 
     const finalState = {
@@ -459,50 +500,42 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         timestamp: Date.now(),
         isCinematic: true
       }],
-      mode: optimisticState.sceneIndex < 4 ? GameMode.MONTAGE : GameMode.CINEMATIC,
+      mode: optimisticState.sceneIndex < Math.max(4, stateRef.current.campaignPacing.minScenes) ? GameMode.MONTAGE : GameMode.CINEMATIC,
       montage: {
         ...optimisticState.montage,
         step: 'MINIGAME'
       },
-      currentTurnPlayerId: nextPlayer.id, // Pass the token
-      turnCounter: state.turnCounter + 1, // Increment turn counter
-      isProcessingTurn: false // Unlock
+      currentTurnPlayerId: nextPlayer.id,
+      turnCounter: stateRef.current.turnCounter + 1,
+      isProcessingTurn: false,
+      currentSceneId: nextSceneId || optimisticState.currentSceneId
     };
 
-    // Update state with new scene if it exists
-    if (nextSceneId && state.campaign?.scenes[nextSceneId]) {
-      finalState.currentSceneId = nextSceneId;
-    }
-
-    setState(finalState);
-    // Broadcast the result to the mesh
-    broadcast({ type: 'SYNC_STATE', payload: finalState });
+    pushState(finalState, true);
     setIsLoading(false);
   };
 
   const completeMinigame = async (successCount: number) => {
-    // Mesh: Everyone processes locally and broadcasts
     const levelsGained = successCount > 0 ? 1 : 0;
     const newState = {
-      ...state,
-      players: state.players.map(p => ({ ...p, level: p.level + levelsGained })),
-      messages: [...state.messages, {
+      ...stateRef.current,
+      players: stateRef.current.players.map(p => ({ ...p, level: p.level + levelsGained })),
+      messages: [...stateRef.current.messages, {
         id: Date.now().toString(),
         sender: 'system',
         text: `MONTAGE TRAINING COMPLETE: Party gained ${levelsGained} Level(s). Now entering Story Mode...`,
         timestamp: Date.now()
       }],
       montage: {
-        ...state.montage,
+        ...stateRef.current.montage,
         step: 'STORY_DECISION',
-        queue: [...state.players.map(p => p.id)], 
+        queue: [...stateRef.current.players.map(p => p.id)],
         activePlayerId: null
       }
     };
 
-    setState(newState);
-    broadcast({ type: 'SYNC_STATE', payload: newState });
-    await startNextMontageTurn([...state.players.map(p => p.id)]);
+    pushState(newState, true);
+    await startNextMontageTurn([...stateRef.current.players.map(p => p.id)]);
   };
 
   const startNextMontageTurn = async (queue: string[]) => {
@@ -511,28 +544,27 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return;
     }
     const nextPlayerId = queue[0];
-    const player = state.players.find(p => p.id === nextPlayerId);
+    const player = stateRef.current.players.find(p => p.id === nextPlayerId);
     if (!player) return;
 
     setIsLoading(true);
     const scenario = await geminiService.getMontageSituation(player.name, player.class);
 
-    setState(prev => ({
-      ...prev,
+    pushState({
+      ...stateRef.current,
       montage: {
-        ...prev.montage,
+        ...stateRef.current.montage,
         activePlayerId: nextPlayerId,
         queue: queue,
         currentPrompt: scenario.text,
         options: scenario.options
       }
-    }));
+    }, true);
     setIsLoading(false);
   };
 
   const makeMontageDecision = async (choice: string) => {
-    // Mesh: Everyone processes locally and broadcasts
-    const player = state.players.find(p => p.id === state.montage.activePlayerId);
+    const player = stateRef.current.players.find(p => p.id === stateRef.current.montage.activePlayerId);
     if (!player) return;
 
     setIsLoading(true);
@@ -540,36 +572,34 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     parseInventoryUpdate(resolution);
 
     const newState = {
-      ...state,
-      messages: [...state.messages, {
+      ...stateRef.current,
+      messages: [...stateRef.current.messages, {
         id: Date.now().toString(),
         sender: 'dm',
         text: `**${player.name}** chose: "${choice}"\nResult: ${resolution}`,
         timestamp: Date.now(),
         isCinematic: true
       }],
-      players: state.players.map(p => p.id === player.id ? { ...p, contributions: p.contributions + 1 } : p)
+      players: stateRef.current.players.map(p => p.id === player.id ? { ...p, contributions: p.contributions + 1 } : p)
     };
 
-    setState(newState);
-    broadcast({ type: 'SYNC_STATE', payload: newState });
+    pushState(newState, true);
 
-    const remainingQueue = state.montage.queue.slice(1);
+    const remainingQueue = stateRef.current.montage.queue.slice(1);
     await startNextMontageTurn(remainingQueue);
   };
 
   const finishMontage = async () => {
-    // Mesh: Everyone processes locally and broadcasts
     setIsLoading(true);
-    const nextSceneIdx = state.sceneIndex + 1;
+    const nextSceneIdx = stateRef.current.sceneIndex + 1;
     const location = await getGeoLocation();
     const nextSceneText = await geminiService.generateNextScene(nextSceneIdx, location);
 
     const newState = {
-      ...state,
+      ...stateRef.current,
       sceneIndex: nextSceneIdx,
       mode: GameMode.CINEMATIC,
-      messages: [...state.messages, {
+      messages: [...stateRef.current.messages, {
         id: Date.now().toString(),
         sender: 'dm',
         text: nextSceneText,
@@ -578,23 +608,17 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }]
     };
 
-    setState(newState);
-    broadcast({ type: 'SYNC_STATE', payload: newState });
+    pushState(newState, true);
     setIsLoading(false);
   };
 
   const handleAgentTurn = async (player: Player) => {
     setIsLoading(true);
-    
-    // Generate action
-    const action = await agentService.generateAction(player, state.messages, `Scene ${state.sceneIndex}`);
-    
-    // Process as if the player sent it
+
+    const action = await agentService.generateAction(player, stateRef.current.messages, `Scene ${stateRef.current.sceneIndex}`);
     await sendPlayerAction(action, player.id);
     setIsLoading(false);
   };
-
-  // --- Helpers ---
 
   const getGeoLocation = async () => {
     try {
@@ -602,7 +626,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 5000 });
       });
       return { lat: position.coords.latitude, lng: position.coords.longitude };
-    } catch (e) {
+    } catch {
       return undefined;
     }
   };
@@ -614,82 +638,77 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     while ((match = regex.exec(text)) !== null) {
       if (match[1]) newToppings.push(match[1].trim());
     }
-    
+
     if (newToppings.length > 0) {
-      setState(prev => ({
-        ...prev,
-        pizza: {
-          ...prev.pizza,
-          toppings: [...prev.pizza.toppings, ...newToppings]
-        }
-      }));
+      setState(prev => {
+        const updated = {
+          ...prev,
+          pizza: {
+            ...prev.pizza,
+            toppings: [...prev.pizza.toppings, ...newToppings]
+          }
+        };
+        persistSnapshot(updated);
+        return updated;
+      });
     }
   };
 
   const resetGame = () => {
-     clearSave();
-     window.location.reload();
+    localStorage.removeItem(SAVE_KEY);
+    localStorage.removeItem(SNAPSHOT_KEY);
+    localStorage.removeItem(CHAPTER_KEY);
+    window.location.reload();
   };
 
   const finishGame = () => {
-    // Mesh: Anyone can finish and broadcast
-    const newState = { ...state, phase: GamePhase.ORDER_SUMMARY };
-    setState(newState);
-    broadcast({ type: 'SYNC_STATE', payload: newState });
+    const newState = { ...stateRef.current, phase: GamePhase.ORDER_SUMMARY };
+    pushState(newState, true);
   };
 
-  // Add a new function to expand the story dynamically
   const expandStoryBranch = async (currentSceneId: string) => {
-    if (!network.isHost && network.connected) return; // Only host expands
+    if (!network.isHost && network.connected) return;
     setIsLoading(true);
-    
-    // 1. Get the current scene to know what choices led here
-    const currentScene = state.campaign?.scenes[currentSceneId];
-    if (!currentScene) { setIsLoading(false); return; }
-    
-    // 2. Generate the NEXT 3 branches for this specific path
-    // We ask the AI: "Given they chose [currentScene.title], what are the 3 next possible scenes?"
+
+    const currentScene = stateRef.current.campaign?.scenes[currentSceneId];
+    if (!currentScene) {
+      setIsLoading(false);
+      return;
+    }
+
     const prompt = `
      The party has just arrived at: "${currentScene.title}".
      They are now facing the next challenge.
-     Generate 3 distinct choices (A, B, C) and the immediate NEXT scene for EACH choice.
-     
+     Generate ${stateRef.current.campaignPacing.branchingFactor} distinct choices and the immediate NEXT scene for EACH choice.
+     The campaign pacing target is ${stateRef.current.campaignPacing.averageLabel}.
      Output JSON:
      {
        "newScenes": [
-         { "id": "scene_3_A", "title": "...", "description": "...", "encounterType": "...", "options": [...] },
-         { "id": "scene_3_B", "title": "...", "description": "...", "encounterType": "...", "options": [...] },
-         { "id": "scene_3_C", "title": "...", "description": "...", "encounterType": "...", "options": [...] }
+         { "id": "scene_3_A", "title": "...", "description": "...", "encounterType": "...", "options": [...] }
        ]
      }
      `;
-    
+
     try {
       const response = await geminiService.ai?.models.generateContent({
         model: 'gemini-2.5-flash',
         contents: prompt,
         config: { responseMimeType: 'application/json' }
       });
-    
-      const data = JSON.parse(response?.text || "{}");
+
+      const data = JSON.parse(response?.text || '{}');
       const newScenes = data.newScenes || [];
-    
-      // 3. Merge new scenes into the campaign
-      const updatedScenes = { ...state.campaign?.scenes };
+      const updatedScenes = { ...stateRef.current.campaign?.scenes };
       newScenes.forEach((s: any) => {
         updatedScenes[s.id] = s;
       });
-    
-      // 4. Update state
-      setState(prev => ({
-        ...prev,
-        campaign: prev.campaign ? { ...prev.campaign, scenes: updatedScenes } : null
-      }));
-    
-      // Broadcast to all peers
-      broadcast({ type: 'SYNC_STATE', payload: state });
+
+      pushState({
+        ...stateRef.current,
+        campaign: stateRef.current.campaign ? { ...stateRef.current.campaign, scenes: updatedScenes } : null
+      }, true);
     } catch (err) {
-      console.error("Failed to expand story branch", err);
+      console.error('Failed to expand story branch', err);
     } finally {
       setIsLoading(false);
     }
@@ -703,10 +722,12 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     generateCampaign,
     startGame,
     sendPlayerAction,
+    sendPartyMessage,
     completeMinigame,
     makeMontageDecision,
     resetGame,
     finishGame,
+    setCampaignPacing,
     isLoading,
     myPlayerId,
     expandStoryBranch
